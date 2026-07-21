@@ -583,5 +583,35 @@
     "imdbRatingCount": 0,
     "url": "https://pbcdnw.aoneroom.com/image/2025/11/03/d4d4e6f1150de3e2291164da76f927e6.jpg",
     "not_found_reason": "no_tmdb_match"
+  },
+  {
+    "serial_no": 40,
+    "main_url": "https://sflix.film/spa/videoPlayPage/movies/resurrection-ertugrul-AARn8a2F0ma",
+    "detailPath": "resurrection-ertugrul-AARn8a2F0ma",
+    "title": "Resurrection: Ertugrul",
+    "releaseDate": "2017-04-15",
+    "subjectId": "8690954071785752632",
+    "imdb_id/tmdb_id": "N/A",
+    "genre": "Action,Adventure,Drama",
+    "countryName": "Turkey",
+    "imdbRatingValue": "7.9",
+    "imdbRatingCount": 42137,
+    "url": "https://pbcdnw.aoneroom.com/image/2026/01/27/795b202849457ba94700c7e040ba56ff.jpg",
+    "not_found_reason": "no_tmdb_match"
+  },
+  {
+    "serial_no": 41,
+    "main_url": "https://sflix.film/spa/videoPlayPage/movies/hidden-love-2LhTknKRc63",
+    "detailPath": "hidden-love-2LhTknKRc63",
+    "title": "Hidden Love",
+    "releaseDate": "2021-03-14",
+    "subjectId": "2601929977914344784",
+    "imdb_id/tmdb_id": "None/121489",
+    "genre": "Reality-TV",
+    "countryName": "Thailand",
+    "imdbRatingValue": "7.3",
+    "imdbRatingCount": 36,
+    "url": "https://pbcdnw.aoneroom.com/image/2025/11/02/3ab05e73f82707fac0600092ade382dc.jpg",
+    "not_found_reason": "imdb_id_missing"
   }
 ]
