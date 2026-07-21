@@ -5,24 +5,30 @@ GitHub Actions deployable version.
 
 Pipeline
 ────────
-  1. Load existing  data/all_data_part_N.json  (deduplication).
+  1. Load existing  data/all_data_part_N.json  (deduplication by subjectId AND main_url).
   2. Load existing  data/main_urls_list_part_N.txt  (URL deduplication).
   3. Fetch raw pages from AOneRoom API.
-  4. Add every new main_url to the URL list  → save BEFORE matching.
-  5. Enrich only truly-new items with TMDB / IMDB.
-  6. Merge + save single output:  data/all_data_part_N.json  (≤ 2 MB each).
-  7. Save  data/main_urls_list_part_N.txt  (≤ 2 MB each, unique URLs only).
-  8. Update  data/index.json.
+  4. Skip any fetched URL already present in all_data OR main_urls_list  → no reprocessing.
+  5. Add every new main_url to the URL list  → save BEFORE matching.
+  6. Enrich only truly-new items with TMDB / IMDB.
+  7. Items whose TMDB/IMDB IDs are missing or completely non-matching →
+       data/imdb_tmdb_or_any_of_this_not_found_or_not_matching_part_N.json  (≤ 2 MB each).
+  8. Merge + save single output:  data/all_data_part_N.json  (≤ 2 MB each).
+  9. Save  data/main_urls_list_part_N.txt  (≤ 2 MB each, unique URLs only).
+ 10. Update  data/index.json.
 
 Output files
 ────────────
-  data/all_data_part_1.json          ← single unified JSON, auto-split at 2 MB
+  data/all_data_part_1.json
   data/all_data_part_2.json
   ...
-  data/main_urls_list_part_1.txt     ← unique main_urls, auto-split at 2 MB
+  data/main_urls_list_part_1.txt
   data/main_urls_list_part_2.txt
   ...
-  data/index.json                    ← manifest + run stats
+  data/imdb_tmdb_or_any_of_this_not_found_or_not_matching_part_1.json
+  data/imdb_tmdb_or_any_of_this_not_found_or_not_matching_part_2.json
+  ...
+  data/index.json
 
 Each JSON item shape
 ────────────────────
@@ -39,6 +45,14 @@ Each JSON item shape
   "imdbRatingValue" : "5.6",
   "imdbRatingCount" : 263,
   "url"             : "https://pbcdnw.aoneroom.com/image/..."
+}
+
+Not-found / not-matching item shape (same fields, plus reason)
+──────────────────────────────────────────────────────────────
+{
+  ... (all standard fields) ...
+  "imdb_id/tmdb_id" : "N/A",
+  "not_found_reason": "no_tmdb_match"   # or "imdb_id_missing" / "tmdb_id_missing" / "ids_not_matching"
 }
 """
 
@@ -66,8 +80,9 @@ MAX_FILE_BYTES    = 2 * 1024 * 1024          # 2 MB hard cap per file
 PAGES_TO_FETCH    = int(os.environ.get("PAGES_TO_FETCH", "10"))
 PER_PAGE          = int(os.environ.get("PER_PAGE", "100"))
 
-JSON_PREFIX       = "all_data"               # only JSON prefix used
-URL_PREFIX        = "main_urls_list"         # only URL-list prefix used
+JSON_PREFIX       = "all_data"
+URL_PREFIX        = "main_urls_list"
+NOT_FOUND_PREFIX  = "imdb_tmdb_or_any_of_this_not_found_or_not_matching"
 
 MAIN_HEADERS = {
     "User-Agent"     : "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
@@ -82,25 +97,59 @@ MAIN_HEADERS = {
 #  JSON helpers
 # ══════════════════════════════════════════════
 
-def load_json_parts(prefix: str) -> tuple[list[dict], set[str]]:
+def load_json_parts(prefix: str) -> tuple[list[dict], set[str], set[str]]:
     """
     Load all  <prefix>_part_N.json  files.
-    Returns (items_list, seen_subject_ids).
+    Returns (items_list, seen_subject_ids, seen_main_urls).
+    """
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    items:     list[dict] = []
+    seen_ids:  set[str]   = set()
+    seen_urls: set[str]   = set()
+
+    pat = re.compile(rf"^{re.escape(prefix)}_part_(\d+)\.json$")
+    for f in sorted(
+        DATA_DIR.iterdir(),
+        key=lambda f: int(m.group(1)) if (m := pat.match(f.name)) else -1,
+    ):
+        if not pat.match(f.name):
+            continue
+        try:
+            for it in json.loads(f.read_text(encoding="utf-8")):
+                sid = it.get("subjectId", "")
+                mu  = it.get("main_url",  "")
+                if sid and sid not in seen_ids:
+                    seen_ids.add(sid)
+                    items.append(it)
+                if mu:
+                    seen_urls.add(mu)
+        except Exception as e:
+            print(f"  [WARN] Could not load {f.name}: {e}")
+
+    return items, seen_ids, seen_urls
+
+
+def load_not_found_parts(prefix: str) -> tuple[list[dict], set[str]]:
+    """
+    Load existing not-found/not-matching records.
+    Returns (items_list, seen_main_urls_in_not_found).
     """
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     items: list[dict] = []
     seen:  set[str]   = set()
 
     pat = re.compile(rf"^{re.escape(prefix)}_part_(\d+)\.json$")
-    for f in sorted(DATA_DIR.iterdir(),
-                    key=lambda f: int(m.group(1)) if (m := pat.match(f.name)) else -1):
+    for f in sorted(
+        DATA_DIR.iterdir(),
+        key=lambda f: int(m.group(1)) if (m := pat.match(f.name)) else -1,
+    ):
         if not pat.match(f.name):
             continue
         try:
             for it in json.loads(f.read_text(encoding="utf-8")):
-                sid = it.get("subjectId", "")
-                if sid and sid not in seen:
-                    seen.add(sid)
+                mu = it.get("main_url", "")
+                if mu and mu not in seen:
+                    seen.add(mu)
                     items.append(it)
         except Exception as e:
             print(f"  [WARN] Could not load {f.name}: {e}")
@@ -158,8 +207,10 @@ def load_url_parts(prefix: str) -> set[str]:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     seen: set[str] = set()
     pat = re.compile(rf"^{re.escape(prefix)}_part_(\d+)\.txt$")
-    for f in sorted(DATA_DIR.iterdir(),
-                    key=lambda f: int(m.group(1)) if (m := pat.match(f.name)) else -1):
+    for f in sorted(
+        DATA_DIR.iterdir(),
+        key=lambda f: int(m.group(1)) if (m := pat.match(f.name)) else -1,
+    ):
         if not pat.match(f.name):
             continue
         try:
@@ -187,14 +238,14 @@ def save_url_parts(prefix: str, urls: list[str]) -> list[str]:
     if not urls:
         return []
 
-    written: list[str] = []
-    part_n  = 1
-    lines:  list[str] = []
-    cur_bytes = 0
+    written:   list[str] = []
+    part_n     = 1
+    lines:     list[str] = []
+    cur_bytes  = 0
 
     for url in urls:
-        line  = url + "\n"
-        lb    = len(line.encode())
+        line = url + "\n"
+        lb   = len(line.encode())
         if cur_bytes + lb >= MAX_FILE_BYTES and lines:
             _flush_txt(prefix, part_n, lines, written)
             part_n   += 1
@@ -255,10 +306,10 @@ def _year(date_str: str) -> str:
 
 def _score(cand: dict, title: str, year: str,
            imdb_val: str, imdb_cnt: int, is_tv: bool) -> float:
-    ct   = cand.get("name" if is_tv else "title", "")
-    cy   = _year(cand.get("first_air_date" if is_tv else "release_date", ""))
-    cv   = str(cand.get("vote_average", ""))
-    cc   = cand.get("vote_count", 0)
+    ct  = cand.get("name" if is_tv else "title", "")
+    cy  = _year(cand.get("first_air_date" if is_tv else "release_date", ""))
+    cv  = str(cand.get("vote_average", ""))
+    cc  = cand.get("vote_count", 0)
 
     ts = _sim(title, ct) * 50
     ys = 0.0
@@ -313,10 +364,48 @@ def get_imdb_id(tmdb_id: int, is_tv: bool) -> str:
 
 
 # ══════════════════════════════════════════════
+#  ID validation helper
+# ══════════════════════════════════════════════
+
+def _classify_id_result(imdb_id: str, tmdb_id, match: dict) -> tuple[bool, str]:
+    """
+    Returns (is_problematic: bool, reason: str).
+
+    Conditions flagged as not-found / not-matching:
+      • No TMDB match at all                        → "no_tmdb_match"
+      • TMDB match found but TMDB ID is missing     → "tmdb_id_missing"
+      • TMDB ID found but IMDB ID could not be fetched → "imdb_id_missing"
+      • Both IDs present but title similarity < 0.5 → "ids_not_matching"
+    """
+    if not match:
+        return True, "no_tmdb_match"
+
+    if not tmdb_id:
+        return True, "tmdb_id_missing"
+
+    if not imdb_id:
+        return True, "imdb_id_missing"
+
+    # Extra sanity: check IMDB ID format (must start with "tt")
+    if not str(imdb_id).startswith("tt"):
+        return True, "imdb_id_invalid_format"
+
+    # Check that the best match score is not suspiciously low
+    score = match.get("_score", 0)
+    if score < 25:                            # threshold – title barely matched
+        return True, "ids_not_matching"
+
+    return False, ""
+
+
+# ══════════════════════════════════════════════
 #  Build final item (post-match)
 # ══════════════════════════════════════════════
 
-def build_item(serial_no: int, subject: dict) -> dict:
+def build_item(serial_no: int, subject: dict) -> tuple[dict, bool, str]:
+    """
+    Returns (item_dict, is_problematic, reason).
+    """
     title    = subject.get("title", "")
     date     = subject.get("releaseDate", "")
     imdb_val = subject.get("imdbRatingValue", "")
@@ -330,7 +419,9 @@ def build_item(serial_no: int, subject: dict) -> dict:
     imdb_id = get_imdb_id(tmdb_id, is_tv) if tmdb_id else ""
     comb_id = f"{imdb_id}/{tmdb_id}" if (imdb_id or tmdb_id) else "N/A"
 
-    return {
+    is_prob, reason = _classify_id_result(imdb_id, tmdb_id, match)
+
+    item = {
         "serial_no"      : serial_no,
         "main_url"       : f"{SFLIX_BASE}{detail}",
         "detailPath"     : detail,
@@ -344,6 +435,11 @@ def build_item(serial_no: int, subject: dict) -> dict:
         "imdbRatingCount": imdb_cnt,
         "url"            : cover,
     }
+
+    if is_prob:
+        item["not_found_reason"] = reason
+
+    return item, is_prob, reason
 
 
 # ══════════════════════════════════════════════
@@ -359,22 +455,36 @@ def main():
     print("=" * 60)
 
     # ── 1. Load existing JSON data ─────────────────────────────
-    print("\n→ Loading existing data …")
-    existing_items, seen_ids = load_json_parts(JSON_PREFIX)
+    print("\n→ Loading existing all_data JSON …")
+    existing_items, seen_ids, seen_urls_from_json = load_json_parts(JSON_PREFIX)
     print(f"  Loaded {len(existing_items)} items, {len(seen_ids)} unique subjectIds")
 
-    # ── 2. Load existing URL list ──────────────────────────────
+    # ── 2. Load existing not-found records ────────────────────
+    print("\n→ Loading existing not-found records …")
+    existing_not_found, seen_not_found_urls = load_not_found_parts(NOT_FOUND_PREFIX)
+    print(f"  Loaded {len(existing_not_found)} not-found records")
+
+    # ── 3. Load existing URL list ──────────────────────────────
     print("\n→ Loading existing URL list …")
     known_urls: set[str] = load_url_parts(URL_PREFIX)
 
-    # Back-fill URLs from existing JSON items (older runs may predate url list)
+    # Back-fill URLs from existing JSON items and not-found records
+    # (older runs may predate url list)
     for it in existing_items:
         mu = it.get("main_url", "")
         if mu:
             known_urls.add(mu)
-    print(f"  Known URLs: {len(known_urls)}")
+    for it in existing_not_found:
+        mu = it.get("main_url", "")
+        if mu:
+            known_urls.add(mu)
+    # Also merge URLs seen directly in JSON data
+    known_urls |= seen_urls_from_json
+    # Also merge not-found URLs
+    known_urls |= seen_not_found_urls
+    print(f"  Known URLs (all sources): {len(known_urls)}")
 
-    # ── 3. Fetch pages ─────────────────────────────────────────
+    # ── 4. Fetch pages ─────────────────────────────────────────
     print(f"\n→ Fetching {PAGES_TO_FETCH} pages …")
     raw_subjects: list[dict] = []
     for page in range(1, PAGES_TO_FETCH + 1):
@@ -382,10 +492,48 @@ def main():
         if page < PAGES_TO_FETCH:
             time.sleep(0.4)
 
-    # ── 4. Collect new main_urls (PRE-MATCH) ───────────────────
-    print("\n→ Collecting main_urls before matching …")
-    new_urls_added = 0
+    # ── 5. Filter out already-known URLs ──────────────────────
+    # A URL is "already known" if it appears in:
+    #   • any all_data_part_N.json  main_url field
+    #   • any main_urls_list_part_N.txt
+    #   • any imdb_tmdb_or_any_of_this_not_found_or_not_matching_part_N.json main_url
+    print("\n→ Filtering out already-known URLs …")
+    skipped_url   = 0
+    unique_new:   list[dict] = []
+    seen_this_run: set[str]  = set()
+
     for s in raw_subjects:
+        detail = s.get("detailPath", "")
+        sid    = s.get("subjectId", "")
+        if not detail:
+            continue
+
+        candidate_url = f"{SFLIX_BASE}{detail}"
+
+        # Skip if URL already processed (in any file)
+        if candidate_url in known_urls:
+            skipped_url += 1
+            continue
+
+        # Skip if subjectId already seen (extra guard)
+        if sid and sid in seen_ids:
+            skipped_url += 1
+            continue
+
+        # Skip duplicates within this run
+        key = candidate_url
+        if key in seen_this_run:
+            continue
+        seen_this_run.add(key)
+        unique_new.append(s)
+
+    print(f"  Skipped (already known) : {skipped_url}")
+    print(f"  New to enrich           : {len(unique_new)}")
+
+    # ── 6. Collect new main_urls (PRE-MATCH) ──────────────────
+    print("\n→ Adding new main_urls to known set …")
+    new_urls_added = 0
+    for s in unique_new:
         detail = s.get("detailPath", "")
         if detail:
             url = f"{SFLIX_BASE}{detail}"
@@ -397,40 +545,44 @@ def main():
     print(f"  New URLs this run : {new_urls_added}")
     print(f"  Total unique URLs : {len(all_urls_sorted)}")
 
-    # ── 5. Save URL list NOW (before any TMDB calls) ──────────
+    # ── 7. Save URL list NOW (before any TMDB calls) ──────────
     print("\n→ Saving main_urls_list (pre-match) …")
     url_parts = save_url_parts(URL_PREFIX, all_urls_sorted)
 
-    # ── 6. Determine which subjects are truly new ──────────────
-    seen_this_run: set[str]  = set()
-    unique_new:    list[dict] = []
-    for s in raw_subjects:
-        sid = s.get("subjectId", "")
-        if sid and sid not in seen_ids and sid not in seen_this_run:
-            seen_this_run.add(sid)
-            unique_new.append(s)
-
-    print(f"\n  Raw fetched    : {len(raw_subjects)}")
-    print(f"  Already known  : {len(raw_subjects) - len(unique_new)}")
-    print(f"  New to enrich  : {len(unique_new)}")
-
     if not unique_new:
         print("\n  Nothing new — updating index and exiting.")
-        _write_index(len(existing_items), 0, len(all_urls_sorted), url_parts, [])
+        _write_index(
+            total=len(existing_items),
+            new=0,
+            total_urls=len(all_urls_sorted),
+            total_not_found=len(existing_not_found),
+            url_parts=url_parts,
+            json_parts=[],
+            not_found_parts=[],
+        )
         return
 
-    # ── 7. Enrich new items (TMDB / IMDB) ─────────────────────
+    # ── 8. Enrich new items (TMDB / IMDB) ─────────────────────
     print("\n→ Enriching new items with TMDB/IMDB …")
-    new_items: list[dict] = []
+    new_items:     list[dict] = []
+    new_not_found: list[dict] = []
     base_serial = len(existing_items) + 1
 
     for i, subject in enumerate(unique_new, start=base_serial):
         title = subject.get("title", "")
         print(f"  [{i - base_serial + 1}/{len(unique_new)}] {title}")
-        new_items.append(build_item(i, subject))
+        item, is_prob, reason = build_item(i, subject)
+        if is_prob:
+            print(f"    ⚠  Not found / not matching → {reason}")
+            new_not_found.append(item)
+        else:
+            new_items.append(item)
         time.sleep(0.3)
 
-    # ── 8. Merge (dedup by subjectId) ─────────────────────────
+    print(f"\n  Enriched OK      : {len(new_items)}")
+    print(f"  Not found/match  : {len(new_not_found)}")
+
+    # ── 9. Merge all_data (dedup by subjectId) ────────────────
     seen_merged: set[str]  = set()
     merged:      list[dict] = []
     for it in existing_items + new_items:
@@ -443,33 +595,69 @@ def main():
     for idx, it in enumerate(merged, start=1):
         it["serial_no"] = idx
 
-    # ── 9. Save single unified JSON ────────────────────────────
+    # ── 10. Merge not-found (dedup by main_url) ───────────────
+    seen_nf:      set[str]  = set(seen_not_found_urls)
+    merged_nf:    list[dict] = list(existing_not_found)
+    for it in new_not_found:
+        mu = it.get("main_url", "")
+        if mu and mu not in seen_nf:
+            seen_nf.add(mu)
+            merged_nf.append(it)
+
+    # Re-number not-found records
+    for idx, it in enumerate(merged_nf, start=1):
+        it["serial_no"] = idx
+
+    # ── 11. Save unified all_data JSON ────────────────────────
     print("\n→ Saving all_data JSON parts …")
     json_parts = save_json_parts(JSON_PREFIX, merged)
 
-    # ── 10. Update index ───────────────────────────────────────
-    _write_index(len(merged), len(new_items), len(all_urls_sorted), url_parts, json_parts)
+    # ── 12. Save not-found JSON ───────────────────────────────
+    print("\n→ Saving not-found/not-matching JSON parts …")
+    not_found_parts = save_json_parts(NOT_FOUND_PREFIX, merged_nf)
+
+    # ── 13. Update index ──────────────────────────────────────
+    _write_index(
+        total=len(merged),
+        new=len(new_items),
+        total_urls=len(all_urls_sorted),
+        total_not_found=len(merged_nf),
+        url_parts=url_parts,
+        json_parts=json_parts,
+        not_found_parts=not_found_parts,
+    )
 
     print("\n" + "=" * 60)
     print(f"  Done!")
-    print(f"  New this run  : {len(new_items)}")
-    print(f"  Total items   : {len(merged)}  →  {len(json_parts)} JSON part(s)")
-    print(f"  Unique URLs   : {len(all_urls_sorted)}  →  {len(url_parts)} URL file(s)")
+    print(f"  New (matched) this run : {len(new_items)}")
+    print(f"  Not found this run     : {len(new_not_found)}")
+    print(f"  Total all_data items   : {len(merged)}  →  {len(json_parts)} part(s)")
+    print(f"  Total not-found items  : {len(merged_nf)}  →  {len(not_found_parts)} part(s)")
+    print(f"  Unique URLs            : {len(all_urls_sorted)}  →  {len(url_parts)} URL file(s)")
     print("=" * 60)
 
 
-def _write_index(total: int, new: int, total_urls: int,
-                 url_parts: list[str], json_parts: list[str]):
+def _write_index(
+    total: int,
+    new: int,
+    total_urls: int,
+    total_not_found: int,
+    url_parts: list[str],
+    json_parts: list[str],
+    not_found_parts: list[str],
+):
     stats = {
-        "last_run"          : time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-        "total_items"       : total,
-        "new_this_run"      : new,
-        "pages_fetched"     : PAGES_TO_FETCH,
-        "max_file_size_mb"  : MAX_FILE_BYTES / (1024 * 1024),
-        "total_unique_urls" : total_urls,
+        "last_run"              : time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "total_items"           : total,
+        "new_this_run"          : new,
+        "pages_fetched"         : PAGES_TO_FETCH,
+        "max_file_size_mb"      : MAX_FILE_BYTES / (1024 * 1024),
+        "total_unique_urls"     : total_urls,
+        "total_not_found"       : total_not_found,
         "parts": {
-            JSON_PREFIX : json_parts,
-            URL_PREFIX  : url_parts,
+            JSON_PREFIX       : json_parts,
+            URL_PREFIX        : url_parts,
+            NOT_FOUND_PREFIX  : not_found_parts,
         },
     }
     path = DATA_DIR / "index.json"
