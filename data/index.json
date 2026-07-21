@@ -1,0 +1,16 @@
+{
+  "last_run": "2026-07-21T11:43:12Z",
+  "total_all": 402,
+  "total_perfect": 0,
+  "total_near": 0,
+  "new_this_run": 402,
+  "pages_fetched": 10,
+  "max_file_size_mb": 2.0,
+  "parts": {
+    "entertainment_data": [
+      "entertainment_data_part_1.json"
+    ],
+    "100percent_matching": [],
+    "100percentornearmatching": []
+  }
+}
