@@ -5,17 +5,36 @@ GitHub Actions deployable version.
 
 Pipeline
 ────────
+  0. Load  data/page_already_extracted.txt  → know which pages were done.
   1. Load existing  data/all_data_part_N.json  (deduplication by subjectId AND main_url).
-  2. Load existing  data/main_urls_list_part_N.txt  (URL deduplication).
-  3. Fetch raw pages from AOneRoom API.
-  4. Skip any fetched URL already present in all_data OR main_urls_list  → no reprocessing.
-  5. Add every new main_url to the URL list  → save BEFORE matching.
-  6. Enrich only truly-new items with TMDB / IMDB.
-  7. Items whose TMDB/IMDB IDs are missing or completely non-matching →
+  2. Load existing  data/main_urls_list_part_N.json  (URL deduplication).
+  3. Determine which pages to fetch this run  (PAGES_TO_FETCH controls the
+     *total* page budget; pages already in page_already_extracted.txt are skipped).
+  4. Fetch raw pages from AOneRoom API — only un-extracted pages.
+  5. Skip any fetched URL already present in all_data OR main_urls_list → no reprocessing.
+  6. Add every new main_url to the URL list → save BEFORE matching.
+  7. Enrich only truly-new items with TMDB / IMDB.
+  8. Items whose TMDB/IMDB IDs are missing or completely non-matching →
        data/imdb_tmdb_or_any_of_this_not_found_or_not_matching_part_N.json  (≤ 2 MB each).
-  8. Merge + save single output:  data/all_data_part_N.json  (≤ 2 MB each).
-  9. Save  data/main_urls_list_part_N.txt  (≤ 2 MB each, unique URLs only).
- 10. Update  data/index.json.
+  9. Merge + save single output:  data/all_data_part_N.json  (≤ 2 MB each).
+ 10. Save  data/main_urls_list_part_N.txt  (≤ 2 MB each, unique URLs only).
+ 11. Append newly-fetched page numbers to  data/page_already_extracted.txt.
+ 12. Update  data/index.json.
+
+page_already_extracted.txt  format
+───────────────────────────────────
+One integer per line, representing a page number that has already been
+successfully fetched and processed.  Example:
+
+  1
+  2
+  3
+  …
+  20
+
+On the NEXT run (say PAGES_TO_FETCH=30), the script reads this file,
+sees pages 1-20 are done, and only fetches pages 21-30.
+After that run the file will contain 1-30, and so on.
 
 Output files
 ────────────
@@ -28,6 +47,7 @@ Output files
   data/imdb_tmdb_or_any_of_this_not_found_or_not_matching_part_1.json
   data/imdb_tmdb_or_any_of_this_not_found_or_not_matching_part_2.json
   ...
+  data/page_already_extracted.txt
   data/index.json
 
 Each JSON item shape
@@ -83,6 +103,7 @@ PER_PAGE          = int(os.environ.get("PER_PAGE", "100"))
 JSON_PREFIX       = "all_data"
 URL_PREFIX        = "main_urls_list"
 NOT_FOUND_PREFIX  = "imdb_tmdb_or_any_of_this_not_found_or_not_matching"
+PAGE_TRACKER_FILE = "page_already_extracted.txt"   # ← NEW
 
 MAIN_HEADERS = {
     "User-Agent"     : "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
@@ -91,6 +112,65 @@ MAIN_HEADERS = {
     "Referer"        : "https://www.aoneroom.com/",
     "Origin"         : "https://www.aoneroom.com",
 }
+
+
+# ══════════════════════════════════════════════
+#  PAGE TRACKER  (NEW)
+# ══════════════════════════════════════════════
+
+def load_extracted_pages() -> set[int]:
+    """
+    Read  data/page_already_extracted.txt  and return the set of page
+    numbers that have already been successfully fetched.
+    Returns an empty set if the file does not exist yet.
+    """
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    tracker = DATA_DIR / PAGE_TRACKER_FILE
+    if not tracker.exists():
+        print(f"  (no {PAGE_TRACKER_FILE} found – starting fresh)")
+        return set()
+    pages: set[int] = set()
+    for line in tracker.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if line.isdigit():
+            pages.add(int(line))
+    print(f"  Already extracted pages: {sorted(pages)}")
+    return pages
+
+
+def save_extracted_pages(pages: set[int]) -> None:
+    """
+    Write the complete set of extracted page numbers to
+    data/page_already_extracted.txt  (one integer per line, sorted).
+    """
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    tracker = DATA_DIR / PAGE_TRACKER_FILE
+    content = "\n".join(str(p) for p in sorted(pages)) + "\n"
+    tracker.write_text(content, encoding="utf-8")
+    print(f"  💾  {PAGE_TRACKER_FILE}  updated  ({len(pages)} pages tracked)")
+
+
+def compute_pages_to_run(already_done: set[int], target_total: int) -> list[int]:
+    """
+    Given pages already extracted and a target total page budget,
+    return the list of NEW page numbers to fetch this run.
+
+    Example
+    ───────
+    already_done  = {1, 2, …, 20}
+    target_total  = 30          (PAGES_TO_FETCH env-var)
+    → returns [21, 22, …, 30]
+
+    If PAGES_TO_FETCH=10 and pages 1-10 are already done, returns [].
+    If PAGES_TO_FETCH=5  and nothing is done yet, returns [1,2,3,4,5].
+
+    Strategy: we always aim for pages 1 … target_total and skip the
+    ones we already have.  This handles gaps too (e.g. a page that
+    failed previously will be retried next run if it was never saved).
+    """
+    all_target = set(range(1, target_total + 1))
+    pending    = sorted(all_target - already_done)
+    return pending
 
 
 # ══════════════════════════════════════════════
@@ -449,10 +529,30 @@ def build_item(serial_no: int, subject: dict) -> tuple[dict, bool, str]:
 def main():
     print("=" * 60)
     print("  AOneRoom Trending Scraper + TMDB/IMDB Enricher")
-    print(f"  Pages: 1 → {PAGES_TO_FETCH}  |  Per page: {PER_PAGE}")
+    print(f"  PAGES_TO_FETCH target : {PAGES_TO_FETCH}  |  Per page: {PER_PAGE}")
     print(f"  Data dir : {DATA_DIR.resolve()}")
     print(f"  TMDB key : {'✓ set' if TMDB_API_KEY else '✗ NOT SET'}")
     print("=" * 60)
+
+    # ── 0. Load page tracker ───────────────────────────────────
+    print("\n→ Loading page tracker …")
+    already_extracted: set[int] = load_extracted_pages()
+
+    # Determine which pages to actually fetch this run
+    pages_this_run: list[int] = compute_pages_to_run(already_extracted, PAGES_TO_FETCH)
+
+    if not pages_this_run:
+        print(f"\n  ✅  All pages up to {PAGES_TO_FETCH} already extracted.")
+        print(f"      To fetch more, increase PAGES_TO_FETCH beyond {PAGES_TO_FETCH}.")
+        _write_index(
+            total=0, new=0, total_urls=0, total_not_found=0,
+            url_parts=[], json_parts=[], not_found_parts=[],
+            already_extracted_pages=sorted(already_extracted),
+            pages_this_run=[],
+        )
+        return
+
+    print(f"  Pages to fetch this run : {pages_this_run}")
 
     # ── 1. Load existing JSON data ─────────────────────────────
     print("\n→ Loading existing all_data JSON …")
@@ -469,7 +569,6 @@ def main():
     known_urls: set[str] = load_url_parts(URL_PREFIX)
 
     # Back-fill URLs from existing JSON items and not-found records
-    # (older runs may predate url list)
     for it in existing_items:
         mu = it.get("main_url", "")
         if mu:
@@ -478,29 +577,33 @@ def main():
         mu = it.get("main_url", "")
         if mu:
             known_urls.add(mu)
-    # Also merge URLs seen directly in JSON data
     known_urls |= seen_urls_from_json
-    # Also merge not-found URLs
     known_urls |= seen_not_found_urls
     print(f"  Known URLs (all sources): {len(known_urls)}")
 
-    # ── 4. Fetch pages ─────────────────────────────────────────
-    print(f"\n→ Fetching {PAGES_TO_FETCH} pages …")
-    raw_subjects: list[dict] = []
-    for page in range(1, PAGES_TO_FETCH + 1):
-        raw_subjects.extend(fetch_page(page, PER_PAGE))
-        if page < PAGES_TO_FETCH:
+    # ── 4. Fetch pages (only new ones) ────────────────────────
+    print(f"\n→ Fetching {len(pages_this_run)} new page(s): {pages_this_run} …")
+    raw_subjects:       list[dict] = []
+    successfully_fetched: set[int] = set()
+
+    for idx, page in enumerate(pages_this_run):
+        subjects = fetch_page(page, PER_PAGE)
+        if subjects is not None:               # empty list is still "fetched OK"
+            raw_subjects.extend(subjects)
+            successfully_fetched.add(page)
+        if idx < len(pages_this_run) - 1:
             time.sleep(0.4)
 
+    print(f"  Successfully fetched pages : {sorted(successfully_fetched)}")
+    if len(successfully_fetched) < len(pages_this_run):
+        failed = set(pages_this_run) - successfully_fetched
+        print(f"  ⚠  Failed pages (will retry next run): {sorted(failed)}")
+
     # ── 5. Filter out already-known URLs ──────────────────────
-    # A URL is "already known" if it appears in:
-    #   • any all_data_part_N.json  main_url field
-    #   • any main_urls_list_part_N.txt
-    #   • any imdb_tmdb_or_any_of_this_not_found_or_not_matching_part_N.json main_url
     print("\n→ Filtering out already-known URLs …")
-    skipped_url   = 0
-    unique_new:   list[dict] = []
-    seen_this_run: set[str]  = set()
+    skipped_url    = 0
+    unique_new:    list[dict] = []
+    seen_this_run: set[str]   = set()
 
     for s in raw_subjects:
         detail = s.get("detailPath", "")
@@ -510,17 +613,14 @@ def main():
 
         candidate_url = f"{SFLIX_BASE}{detail}"
 
-        # Skip if URL already processed (in any file)
         if candidate_url in known_urls:
             skipped_url += 1
             continue
 
-        # Skip if subjectId already seen (extra guard)
         if sid and sid in seen_ids:
             skipped_url += 1
             continue
 
-        # Skip duplicates within this run
         key = candidate_url
         if key in seen_this_run:
             continue
@@ -549,8 +649,14 @@ def main():
     print("\n→ Saving main_urls_list (pre-match) …")
     url_parts = save_url_parts(URL_PREFIX, all_urls_sorted)
 
+    # ── 8. Save page tracker NOW (pages safely recorded) ──────
+    # Only mark pages that were successfully fetched
+    updated_extracted = already_extracted | successfully_fetched
+    print("\n→ Saving page tracker …")
+    save_extracted_pages(updated_extracted)
+
     if not unique_new:
-        print("\n  Nothing new — updating index and exiting.")
+        print("\n  Nothing new to enrich — updating index and exiting.")
         _write_index(
             total=len(existing_items),
             new=0,
@@ -559,10 +665,12 @@ def main():
             url_parts=url_parts,
             json_parts=[],
             not_found_parts=[],
+            already_extracted_pages=sorted(updated_extracted),
+            pages_this_run=pages_this_run,
         )
         return
 
-    # ── 8. Enrich new items (TMDB / IMDB) ─────────────────────
+    # ── 9. Enrich new items (TMDB / IMDB) ─────────────────────
     print("\n→ Enriching new items with TMDB/IMDB …")
     new_items:     list[dict] = []
     new_not_found: list[dict] = []
@@ -582,8 +690,8 @@ def main():
     print(f"\n  Enriched OK      : {len(new_items)}")
     print(f"  Not found/match  : {len(new_not_found)}")
 
-    # ── 9. Merge all_data (dedup by subjectId) ────────────────
-    seen_merged: set[str]  = set()
+    # ── 10. Merge all_data (dedup by subjectId) ───────────────
+    seen_merged: set[str]   = set()
     merged:      list[dict] = []
     for it in existing_items + new_items:
         sid = it.get("subjectId") or it.get("title", "")
@@ -591,32 +699,30 @@ def main():
             seen_merged.add(sid)
             merged.append(it)
 
-    # Re-number serially
     for idx, it in enumerate(merged, start=1):
         it["serial_no"] = idx
 
-    # ── 10. Merge not-found (dedup by main_url) ───────────────
-    seen_nf:      set[str]  = set(seen_not_found_urls)
-    merged_nf:    list[dict] = list(existing_not_found)
+    # ── 11. Merge not-found (dedup by main_url) ───────────────
+    seen_nf:   set[str]   = set(seen_not_found_urls)
+    merged_nf: list[dict] = list(existing_not_found)
     for it in new_not_found:
         mu = it.get("main_url", "")
         if mu and mu not in seen_nf:
             seen_nf.add(mu)
             merged_nf.append(it)
 
-    # Re-number not-found records
     for idx, it in enumerate(merged_nf, start=1):
         it["serial_no"] = idx
 
-    # ── 11. Save unified all_data JSON ────────────────────────
+    # ── 12. Save unified all_data JSON ────────────────────────
     print("\n→ Saving all_data JSON parts …")
     json_parts = save_json_parts(JSON_PREFIX, merged)
 
-    # ── 12. Save not-found JSON ───────────────────────────────
+    # ── 13. Save not-found JSON ───────────────────────────────
     print("\n→ Saving not-found/not-matching JSON parts …")
     not_found_parts = save_json_parts(NOT_FOUND_PREFIX, merged_nf)
 
-    # ── 13. Update index ──────────────────────────────────────
+    # ── 14. Update index ──────────────────────────────────────
     _write_index(
         total=len(merged),
         new=len(new_items),
@@ -625,15 +731,19 @@ def main():
         url_parts=url_parts,
         json_parts=json_parts,
         not_found_parts=not_found_parts,
+        already_extracted_pages=sorted(updated_extracted),
+        pages_this_run=pages_this_run,
     )
 
     print("\n" + "=" * 60)
     print(f"  Done!")
-    print(f"  New (matched) this run : {len(new_items)}")
-    print(f"  Not found this run     : {len(new_not_found)}")
-    print(f"  Total all_data items   : {len(merged)}  →  {len(json_parts)} part(s)")
-    print(f"  Total not-found items  : {len(merged_nf)}  →  {len(not_found_parts)} part(s)")
-    print(f"  Unique URLs            : {len(all_urls_sorted)}  →  {len(url_parts)} URL file(s)")
+    print(f"  Pages fetched this run   : {sorted(successfully_fetched)}")
+    print(f"  Total pages ever done    : {sorted(updated_extracted)}")
+    print(f"  New (matched) this run   : {len(new_items)}")
+    print(f"  Not found this run       : {len(new_not_found)}")
+    print(f"  Total all_data items     : {len(merged)}  →  {len(json_parts)} part(s)")
+    print(f"  Total not-found items    : {len(merged_nf)}  →  {len(not_found_parts)} part(s)")
+    print(f"  Unique URLs              : {len(all_urls_sorted)}  →  {len(url_parts)} URL file(s)")
     print("=" * 60)
 
 
@@ -645,15 +755,19 @@ def _write_index(
     url_parts: list[str],
     json_parts: list[str],
     not_found_parts: list[str],
+    already_extracted_pages: list[int],
+    pages_this_run: list[int],
 ):
     stats = {
-        "last_run"              : time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-        "total_items"           : total,
-        "new_this_run"          : new,
-        "pages_fetched"         : PAGES_TO_FETCH,
-        "max_file_size_mb"      : MAX_FILE_BYTES / (1024 * 1024),
-        "total_unique_urls"     : total_urls,
-        "total_not_found"       : total_not_found,
+        "last_run"                  : time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "total_items"               : total,
+        "new_this_run"              : new,
+        "pages_fetched_this_run"    : pages_this_run,
+        "pages_extracted_total"     : already_extracted_pages,
+        "max_page_extracted"        : max(already_extracted_pages) if already_extracted_pages else 0,
+        "max_file_size_mb"          : MAX_FILE_BYTES / (1024 * 1024),
+        "total_unique_urls"         : total_urls,
+        "total_not_found"           : total_not_found,
         "parts": {
             JSON_PREFIX       : json_parts,
             URL_PREFIX        : url_parts,
