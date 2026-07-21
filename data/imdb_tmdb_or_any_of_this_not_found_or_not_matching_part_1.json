@@ -688,5 +688,20 @@
     "imdbRatingCount": 4944,
     "url": "https://pbcdnw.aoneroom.com/image/2026/01/26/5282c3b6525c52a2507b6b5871f5296e.jpg",
     "not_found_reason": "no_tmdb_match"
+  },
+  {
+    "serial_no": 47,
+    "main_url": "https://sflix.film/spa/videoPlayPage/movies/lesilo-rula-kspOtJcttY4",
+    "detailPath": "lesilo-rula-kspOtJcttY4",
+    "title": "Lesilo Rula",
+    "releaseDate": "2025-05-01",
+    "subjectId": "4175857369404048480",
+    "imdb_id/tmdb_id": "N/A",
+    "genre": "Drama",
+    "countryName": "United States",
+    "imdbRatingValue": "7.0",
+    "imdbRatingCount": 0,
+    "url": "https://pbcdnw.aoneroom.com/image/2026/01/04/6d970eae3956231b8b353810f69160b8.jpeg",
+    "not_found_reason": "no_tmdb_match"
   }
 ]
