@@ -3,23 +3,31 @@ AOneRoom Trending Scraper + IMDB/TMDB ID Matcher
 =================================================
 GitHub Actions deployable version.
 
-Outputs (in ./data/):
-  - entertainment_data_part_N.json       → all items (split at 2 MB)
-  - 100percent_matching_part_N.json      → score ≥ 90
-  - 100percentornearmatching_part_N.json → score 70–89
-  - index.json                           → manifest of all parts + stats
+Pipeline order
+──────────────
+  1. Load existing data (deduplication).
+  2. Fetch raw pages from AOneRoom API.
+  3. Store raw URLs immediately → main_urls_list.txt  (≤ 2 MB per file, auto-split).
+  4. Store raw (pre-match) items → raw_fetched_part_N.json  (≤ 2 MB, auto-split).
+  5. Enrich new items with TMDB / IMDB.
+  6. Merge all three result buckets into one unified set of split files:
+         data/all_data_part_N.json  (≤ 2 MB each)
+     with per-item  "_bucket"  field so you can filter later:
+         "perfect"  → score ≥ 90
+         "near"     → score 70–89
+         "other"    → score < 70
+  7. Write index.json + main_urls_list.txt parts manifest.
 
-Deduplication:
-  - Loads ALL existing JSON parts on startup
-  - Skips any subjectId already present
-  - Appends new items to the correct part (or creates new parts as needed)
+Legacy separate bucket files are still written for backward compatibility:
+  data/entertainment_data_part_N.json
+  data/100percent_matching_part_N.json
+  data/100percentornearmatching_part_N.json
 """
 
 import os
 import re
 import sys
 import json
-import math
 import time
 import requests
 from pathlib import Path
@@ -29,7 +37,7 @@ from difflib import SequenceMatcher
 # CONFIG
 # ──────────────────────────────────────────────
 BASE_URL              = "https://h5-api.aoneroom.com/wefeed-h5api-bff/subject/trending"
-TMDB_API_KEY          = "6fad3f86b8452ee232deb7977d7dcf58"
+TMDB_API_KEY          = os.environ.get("TMDB_API_KEY", "6fad3f86b8452ee232deb7977d7dcf58")
 TMDB_SEARCH_MOVIE     = "https://api.themoviedb.org/3/search/movie"
 TMDB_SEARCH_TV        = "https://api.themoviedb.org/3/search/tv"
 TMDB_MOVIE_DETAIL     = "https://api.themoviedb.org/3/movie/{}"
@@ -41,6 +49,13 @@ MAX_FILE_BYTES        = 2 * 1024 * 1024   # 2 MB hard cap per file
 PAGES_TO_FETCH        = int(os.environ.get("PAGES_TO_FETCH", "10"))
 PER_PAGE              = int(os.environ.get("PER_PAGE", "100"))
 
+# Prefix for the unified merged output (all buckets in one set)
+UNIFIED_PREFIX        = "all_data"
+# Prefix for raw (pre-match) snapshot
+RAW_PREFIX            = "raw_fetched"
+# URL list base name (without _part_N.txt suffix)
+URL_LIST_BASE         = "main_urls_list"
+
 MAIN_HEADERS = {
     "User-Agent"     : "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
     "Accept"         : "application/json",
@@ -49,23 +64,24 @@ MAIN_HEADERS = {
     "Origin"         : "https://www.aoneroom.com",
 }
 
-# ──────────────────────────────────────────────
-# HELPERS – JSON splitting / loading
-# ──────────────────────────────────────────────
+
+# ══════════════════════════════════════════════
+#  HELPERS – JSON split / load
+# ══════════════════════════════════════════════
 
 def load_existing_parts(prefix: str) -> tuple[list[dict], set[str]]:
     """
     Load all *_part_N.json files matching prefix.
-    Returns (all_items, seen_ids).
+    Returns (all_items, seen_subject_ids).
     """
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     all_items: list[dict] = []
-    seen_ids: set[str]    = set()
+    seen_ids:  set[str]   = set()
 
     pattern = re.compile(rf"^{re.escape(prefix)}_part_(\d+)\.json$")
     parts = sorted(
         (f for f in DATA_DIR.iterdir() if pattern.match(f.name)),
-        key=lambda f: int(pattern.match(f.name).group(1))
+        key=lambda f: int(pattern.match(f.name).group(1)),
     )
 
     for part_file in parts:
@@ -85,12 +101,11 @@ def load_existing_parts(prefix: str) -> tuple[list[dict], set[str]]:
 def save_split_parts(prefix: str, items: list[dict]) -> list[str]:
     """
     Write items to numbered part files, each ≤ MAX_FILE_BYTES.
-    Old parts are fully replaced (we always rewrite from scratch to avoid drift).
+    Fully replaces old parts for this prefix.
     Returns list of filenames written.
     """
     DATA_DIR.mkdir(parents=True, exist_ok=True)
 
-    # Remove old parts for this prefix
     old_pattern = re.compile(rf"^{re.escape(prefix)}_part_(\d+)\.json$")
     for f in DATA_DIR.iterdir():
         if old_pattern.match(f.name):
@@ -99,28 +114,30 @@ def save_split_parts(prefix: str, items: list[dict]) -> list[str]:
     if not items:
         return []
 
-    written: list[str] = []
+    written:    list[str]  = []
     part_num    = 1
     part_items: list[dict] = []
 
     for item in items:
         part_items.append(item)
-        # Estimate size
         estimated = len(json.dumps(part_items, ensure_ascii=False, indent=2).encode("utf-8"))
         if estimated >= MAX_FILE_BYTES:
-            # Save current batch (without the item that pushed it over)
             part_items.pop()
             fname = DATA_DIR / f"{prefix}_part_{part_num}.json"
-            fname.write_text(json.dumps(part_items, ensure_ascii=False, indent=2), encoding="utf-8")
+            fname.write_text(
+                json.dumps(part_items, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
             actual_kb = fname.stat().st_size / 1024
             print(f"  📄  {fname.name}  ({len(part_items)} items, {actual_kb:.1f} KB)")
             written.append(fname.name)
             part_num  += 1
-            part_items = [item]   # start fresh part with the overflow item
+            part_items = [item]
 
     if part_items:
         fname = DATA_DIR / f"{prefix}_part_{part_num}.json"
-        fname.write_text(json.dumps(part_items, ensure_ascii=False, indent=2), encoding="utf-8")
+        fname.write_text(
+            json.dumps(part_items, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
         actual_kb = fname.stat().st_size / 1024
         print(f"  📄  {fname.name}  ({len(part_items)} items, {actual_kb:.1f} KB)")
         written.append(fname.name)
@@ -132,12 +149,86 @@ def save_index(stats: dict):
     """Write data/index.json with run stats and part manifests."""
     index_path = DATA_DIR / "index.json"
     index_path.write_text(json.dumps(stats, ensure_ascii=False, indent=2), encoding="utf-8")
-    print(f"  📋  index.json updated")
+    print("  📋  index.json updated")
 
 
-# ──────────────────────────────────────────────
-# STEP 1 – Fetch AOneRoom pages
-# ──────────────────────────────────────────────
+# ══════════════════════════════════════════════
+#  HELPERS – URL list (main_urls_list.txt)
+# ══════════════════════════════════════════════
+
+def load_existing_urls() -> set[str]:
+    """
+    Read all main_urls_list_part_N.txt files and return the set of unique URLs.
+    """
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    seen: set[str] = set()
+    pattern = re.compile(rf"^{re.escape(URL_LIST_BASE)}_part_(\d+)\.txt$")
+    parts = sorted(
+        (f for f in DATA_DIR.iterdir() if pattern.match(f.name)),
+        key=lambda f: int(pattern.match(f.name).group(1)),
+    )
+    for part_file in parts:
+        try:
+            for line in part_file.read_text(encoding="utf-8").splitlines():
+                url = line.strip()
+                if url:
+                    seen.add(url)
+        except Exception as e:
+            print(f"  [WARN] Could not load {part_file.name}: {e}")
+    return seen
+
+
+def save_url_list(all_urls: list[str]) -> list[str]:
+    """
+    Write the full de-duplicated URL list to main_urls_list_part_N.txt files.
+    Each file ≤ MAX_FILE_BYTES.  Fully replaces old parts.
+    Returns list of filenames written.
+    """
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+
+    old_pattern = re.compile(rf"^{re.escape(URL_LIST_BASE)}_part_(\d+)\.txt$")
+    for f in DATA_DIR.iterdir():
+        if old_pattern.match(f.name):
+            f.unlink()
+
+    if not all_urls:
+        return []
+
+    written:       list[str]  = []
+    part_num       = 1
+    part_lines:    list[str]  = []
+    current_bytes  = 0
+
+    for url in all_urls:
+        line       = url + "\n"
+        line_bytes = len(line.encode("utf-8"))
+
+        if current_bytes + line_bytes >= MAX_FILE_BYTES and part_lines:
+            fname = DATA_DIR / f"{URL_LIST_BASE}_part_{part_num}.txt"
+            fname.write_text("".join(part_lines), encoding="utf-8")
+            actual_kb = fname.stat().st_size / 1024
+            print(f"  🔗  {fname.name}  ({len(part_lines)} URLs, {actual_kb:.1f} KB)")
+            written.append(fname.name)
+            part_num      += 1
+            part_lines     = []
+            current_bytes  = 0
+
+        part_lines.append(line)
+        current_bytes += line_bytes
+
+    if part_lines:
+        fname = DATA_DIR / f"{URL_LIST_BASE}_part_{part_num}.txt"
+        fname.write_text("".join(part_lines), encoding="utf-8")
+        actual_kb = fname.stat().st_size / 1024
+        print(f"  🔗  {fname.name}  ({len(part_lines)} URLs, {actual_kb:.1f} KB)")
+        written.append(fname.name)
+
+    return written
+
+
+# ══════════════════════════════════════════════
+#  STEP 1 – Fetch AOneRoom pages
+# ══════════════════════════════════════════════
 
 def fetch_page(page: int, per_page: int = 100) -> list:
     params = {"page": page, "perPage": per_page}
@@ -156,9 +247,9 @@ def fetch_page(page: int, per_page: int = 100) -> list:
         return []
 
 
-# ──────────────────────────────────────────────
-# STEP 2 – TMDB helpers
-# ──────────────────────────────────────────────
+# ══════════════════════════════════════════════
+#  STEP 2 – TMDB helpers
+# ══════════════════════════════════════════════
 
 def str_sim(a: str, b: str) -> float:
     return SequenceMatcher(None, a.lower().strip(), b.lower().strip()).ratio()
@@ -168,8 +259,10 @@ def year_from_date(date_str: str) -> str:
     return date_str[:4] if date_str else ""
 
 
-def score_candidate(candidate: dict, title: str, year: str,
-                    imdb_val: str, imdb_cnt: int, is_tv: bool) -> float:
+def score_candidate(
+    candidate: dict, title: str, year: str,
+    imdb_val: str, imdb_cnt: int, is_tv: bool,
+) -> float:
     cand_title = candidate.get("name" if is_tv else "title", "")
     cand_date  = candidate.get("first_air_date" if is_tv else "release_date", "")
     cand_year  = year_from_date(cand_date)
@@ -202,8 +295,10 @@ def score_candidate(candidate: dict, title: str, year: str,
     return t_score + y_score + r_score + c_score
 
 
-def tmdb_search(title: str, year: str, imdb_val: str,
-                imdb_cnt: int, genre_str: str) -> dict:
+def tmdb_search(
+    title: str, year: str, imdb_val: str,
+    imdb_cnt: int, genre_str: str,
+) -> dict:
     if not TMDB_API_KEY:
         return {}
 
@@ -250,11 +345,41 @@ def get_imdb_id(tmdb_id: int, is_tv: bool) -> str:
         return ""
 
 
-# ──────────────────────────────────────────────
-# STEP 3 – Build enriched item
-# ──────────────────────────────────────────────
+# ══════════════════════════════════════════════
+#  STEP 3 – Build raw item (pre-match snapshot)
+# ══════════════════════════════════════════════
 
-def build_item(serial_no: int, subject: dict) -> dict:
+def build_raw_item(serial_no: int, subject: dict) -> dict:
+    """
+    Lightweight item built from the raw API response — no TMDB calls.
+    Stored in raw_fetched_part_N.json BEFORE any enrichment.
+    """
+    detail    = subject.get("detailPath", "")
+    cover_url = subject.get("cover", {}).get("url", "") if subject.get("cover") else ""
+    return {
+        "serial_no"      : serial_no,
+        "main_url"       : f"{SFLIX_BASE}{detail}",
+        "detailPath"     : detail,
+        "title"          : subject.get("title", ""),
+        "releaseDate"    : subject.get("releaseDate", ""),
+        "subjectId"      : subject.get("subjectId", ""),
+        "genre"          : subject.get("genre", ""),
+        "countryName"    : subject.get("countryName", ""),
+        "imdbRatingValue": subject.get("imdbRatingValue", ""),
+        "imdbRatingCount": subject.get("imdbRatingCount", 0),
+        "url"            : cover_url,
+    }
+
+
+# ══════════════════════════════════════════════
+#  STEP 4 – Build enriched item (post-match)
+# ══════════════════════════════════════════════
+
+def build_enriched_item(serial_no: int, subject: dict) -> dict:
+    """
+    Full enrichment: calls TMDB, then fetches external IMDB id.
+    Returns item dict with _match_score and _bucket fields.
+    """
     title     = subject.get("title", "")
     date      = subject.get("releaseDate", "")
     imdb_val  = subject.get("imdbRatingValue", "")
@@ -272,30 +397,50 @@ def build_item(serial_no: int, subject: dict) -> dict:
     imdb_id     = get_imdb_id(tmdb_id, is_tv) if tmdb_id else ""
     combined_id = f"{imdb_id}/{tmdb_id}" if (imdb_id or tmdb_id) else "N/A"
 
+    bucket = "perfect" if score >= 90 else ("near" if score >= 70 else "other")
+
     return {
-        "serial_no"        : serial_no,
-        "main_url"         : f"{SFLIX_BASE}{detail}",
-        "detailPath"       : detail,
-        "title"            : title,
-        "releaseDate"      : date,
-        "subjectId"        : subject.get("subjectId", ""),
-        "imdb_id/tmdb_id"  : combined_id,
-        "genre"            : genre,
-        "countryName"      : subject.get("countryName", ""),
-        "imdbRatingValue"  : imdb_val,
-        "imdbRatingCount"  : imdb_cnt,
-        "url"              : cover_url,
-        "_match_score"     : score,
+        "serial_no"      : serial_no,
+        "main_url"       : f"{SFLIX_BASE}{detail}",
+        "detailPath"     : detail,
+        "title"          : title,
+        "releaseDate"    : date,
+        "subjectId"      : subject.get("subjectId", ""),
+        "imdb_id/tmdb_id": combined_id,
+        "genre"          : genre,
+        "countryName"    : subject.get("countryName", ""),
+        "imdbRatingValue": imdb_val,
+        "imdbRatingCount": imdb_cnt,
+        "url"            : cover_url,
+        "_match_score"   : score,
+        "_bucket"        : bucket,
     }
 
 
-def clean(lst: list[dict]) -> list[dict]:
+def clean_score(lst: list[dict]) -> list[dict]:
+    """Remove internal _match_score key before saving."""
     return [{k: v for k, v in it.items() if k != "_match_score"} for it in lst]
 
 
-# ──────────────────────────────────────────────
-# STEP 4 – Main
-# ──────────────────────────────────────────────
+# ══════════════════════════════════════════════
+#  MERGE HELPER
+# ══════════════════════════════════════════════
+
+def merge_unique(existing: list[dict], additions: list[dict]) -> list[dict]:
+    seen:   set[str]  = set()
+    merged: list[dict] = []
+    for it in existing + additions:
+        sid = it.get("subjectId", "")
+        key = sid if sid else it.get("title", "")
+        if key and key not in seen:
+            seen.add(key)
+            merged.append(it)
+    return merged
+
+
+# ══════════════════════════════════════════════
+#  MAIN
+# ══════════════════════════════════════════════
 
 def main():
     print("=" * 60)
@@ -305,26 +450,36 @@ def main():
     print(f"  TMDB key : {'✓ set' if TMDB_API_KEY else '✗ NOT SET — IDs will be empty'}")
     print("=" * 60)
 
-    if not TMDB_API_KEY:
-        print("\n[ERROR] TMDB_API_KEY environment variable is not set.")
-        print("  Add it as a GitHub Actions secret and reference it in the workflow.")
-
-    # ── 4a. Load existing data (deduplication) ──
+    # ── 1. Load existing data (deduplication) ──────────────────
     print("\n→ Loading existing data for deduplication …")
+
     existing_all,    seen_all    = load_existing_parts("entertainment_data")
-    existing_perfect, seen_perf  = load_existing_parts("100percent_matching")
-    existing_near,   seen_near   = load_existing_parts("100percentornearmatching")
+    existing_perfect, _          = load_existing_parts("100percent_matching")
+    existing_near,   _           = load_existing_parts("100percentornearmatching")
+    existing_unified, _          = load_existing_parts(UNIFIED_PREFIX)
+    existing_raw,    _           = load_existing_parts(RAW_PREFIX)
 
-    # Unified seen set (subjectIds already stored anywhere)
-    seen_global: set[str] = set()
-    for it in existing_all:
-        sid = it.get("subjectId", "")
-        if sid:
-            seen_global.add(sid)
+    # Unified global seen set – subjectIds already stored in entertainment_data
+    # (entertainment_data is the primary store; unified may overlap)
+    seen_global: set[str] = {it["subjectId"] for it in existing_all if it.get("subjectId")}
 
-    print(f"  Already stored: {len(existing_all)} unique items")
+    print(f"  Already stored (all)    : {len(existing_all)}")
+    print(f"  Already stored (unified): {len(existing_unified)}")
+    print(f"  Already stored (raw)    : {len(existing_raw)}")
 
-    # ── 4b. Fetch new pages ──
+    # ── 2. Load existing URLs ──────────────────────────────────
+    print("\n→ Loading existing URL list …")
+    existing_url_set: set[str] = load_existing_urls()
+
+    # Also harvest main_urls from all existing JSON parts (backfill)
+    for it in existing_all + existing_unified + existing_raw:
+        mu = it.get("main_url", "")
+        if mu:
+            existing_url_set.add(mu)
+
+    print(f"  Known URLs so far: {len(existing_url_set)}")
+
+    # ── 3. Fetch raw pages ────────────────────────────────────
     print(f"\n→ Fetching {PAGES_TO_FETCH} pages …")
     raw_subjects: list[dict] = []
     for page in range(1, PAGES_TO_FETCH + 1):
@@ -333,99 +488,170 @@ def main():
         if page < PAGES_TO_FETCH:
             time.sleep(0.4)
 
-    # Deduplicate source list by subjectId
-    seen_this_run: set[str] = set()
-    unique_new: list[dict]  = []
+    # Deduplicate by subjectId for enrichment pipeline
+    seen_this_run: set[str]  = set()
+    unique_new:    list[dict] = []
     for s in raw_subjects:
         sid = s.get("subjectId", "")
         if sid and sid not in seen_global and sid not in seen_this_run:
             seen_this_run.add(sid)
             unique_new.append(s)
 
-    print(f"\n  Fetched       : {len(raw_subjects)} raw")
-    print(f"  Already known : {len(raw_subjects) - len(unique_new)}")
-    print(f"  New to enrich : {len(unique_new)}")
+    print(f"\n  Fetched raw    : {len(raw_subjects)}")
+    print(f"  Already known  : {len(raw_subjects) - len(unique_new)}")
+    print(f"  New to enrich  : {len(unique_new)}")
 
+    # ── 4. Collect ALL main_urls (existing + newly fetched pages) ──
+    #       Do this BEFORE any TMDB/IMDB matching.
+    print("\n→ Collecting main_urls (pre-match) …")
+
+    new_page_urls: list[str] = []
+    for s in raw_subjects:
+        detail = s.get("detailPath", "")
+        if detail:
+            url = f"{SFLIX_BASE}{detail}"
+            if url not in existing_url_set:
+                existing_url_set.add(url)
+                new_page_urls.append(url)
+
+    all_urls_ordered: list[str] = sorted(existing_url_set)   # stable sort
+    print(f"  New URLs this run  : {len(new_page_urls)}")
+    print(f"  Total unique URLs  : {len(all_urls_ordered)}")
+
+    # ── 5. Save URL list NOW (pre-match) ──────────────────────
+    print("\n→ Saving main_urls_list (pre-match) …")
+    url_parts = save_url_list(all_urls_ordered)
+
+    # ── 6. Build and save raw snapshot (pre-match JSON) ───────
+    print("\n→ Saving raw (pre-match) JSON snapshot …")
+    base_serial_raw = len(existing_raw) + 1
+    new_raw_items: list[dict] = []
+    seen_raw_ids: set[str] = {it.get("subjectId", "") for it in existing_raw}
+
+    for i, subject in enumerate(unique_new, start=base_serial_raw):
+        sid = subject.get("subjectId", "")
+        if sid not in seen_raw_ids:
+            seen_raw_ids.add(sid)
+            new_raw_items.append(build_raw_item(i, subject))
+
+    all_raw = merge_unique(existing_raw, new_raw_items)
+    for idx, it in enumerate(all_raw, start=1):
+        it["serial_no"] = idx
+    parts_raw = save_split_parts(RAW_PREFIX, all_raw)
+
+    # ── 7. Early exit if nothing new to enrich ────────────────
     if not unique_new:
-        print("\n  Nothing new to process. Exiting.")
-        # Still rewrite index to reflect current state
+        print("\n  Nothing new to enrich. Updating index and exiting.")
         save_index({
-            "last_run"         : time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-            "total_all"        : len(existing_all),
-            "total_perfect"    : len(existing_perfect),
-            "total_near"       : len(existing_near),
-            "new_this_run"     : 0,
-            "pages_fetched"    : PAGES_TO_FETCH,
+            "last_run"           : time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "total_all"          : len(existing_all),
+            "total_perfect"      : len(existing_perfect),
+            "total_near"         : len(existing_near),
+            "total_unified"      : len(existing_unified),
+            "total_raw"          : len(all_raw),
+            "new_this_run"       : 0,
+            "pages_fetched"      : PAGES_TO_FETCH,
+            "total_unique_urls"  : len(all_urls_ordered),
+            "url_list_parts"     : url_parts,
+            "parts": {
+                "entertainment_data"       : [],
+                "100percent_matching"      : [],
+                "100percentornearmatching" : [],
+                UNIFIED_PREFIX             : [],
+                RAW_PREFIX                 : parts_raw,
+            },
         })
         return
 
-    # ── 4c. Enrich new items ──
+    # ── 8. Enrich new items with TMDB/IMDB (post-URL storage) ─
     print("\n→ Enriching new items with TMDB/IMDB …")
-    new_all, new_perfect, new_near = [], [], []
+    new_enriched: list[dict] = []
     base_serial = len(existing_all) + 1
 
     for i, subject in enumerate(unique_new, start=base_serial):
         title = subject.get("title", "")
         print(f"  [{i - base_serial + 1}/{len(unique_new)}] {title}")
-        item  = build_item(i, subject)
-        new_all.append(item)
-
-        sc = item["_match_score"]
-        if sc >= 90:
-            new_perfect.append(item)
-        elif sc >= 70:
-            new_near.append(item)
-
+        item = build_enriched_item(i, subject)
+        new_enriched.append(item)
         time.sleep(0.3)
 
-    # ── 4d. Merge and deduplicate before saving ──
-    def merge_unique(existing: list[dict], additions: list[dict]) -> list[dict]:
-        seen: set[str] = set()
-        merged: list[dict] = []
-        for it in existing + additions:
-            sid = it.get("subjectId", "")
-            key = sid if sid else it.get("title", "")
-            if key and key not in seen:
-                seen.add(key)
-                merged.append(it)
-        return merged
+    # Bucket split for backward-compat files
+    new_perfect = [it for it in new_enriched if it["_match_score"] >= 90]
+    new_near    = [it for it in new_enriched if 70 <= it["_match_score"] < 90]
 
-    all_items     = merge_unique(existing_all,     clean(new_all))
-    all_perfect   = merge_unique(existing_perfect, clean(new_perfect))
-    all_near      = merge_unique(existing_near,    clean(new_near))
+    # ── 9. Merge into legacy buckets ──────────────────────────
+    all_items   = merge_unique(existing_all,     clean_score(new_enriched))
+    all_perfect = merge_unique(existing_perfect, clean_score(new_perfect))
+    all_near    = merge_unique(existing_near,    clean_score(new_near))
 
-    # Renumber serial_no sequentially after merge
     for idx, it in enumerate(all_items, start=1):
         it["serial_no"] = idx
 
-    # ── 4e. Save split parts ──
-    print("\n→ Saving files …")
-    parts_all     = save_split_parts("entertainment_data",         all_items)
-    parts_perfect = save_split_parts("100percent_matching",        all_perfect)
-    parts_near    = save_split_parts("100percentornearmatching",   all_near)
+    # ── 10. Merge into unified single-file-set ─────────────────
+    #  Unified = entertainment_data items + any extras from perfect/near
+    #  (since entertainment_data already contains everything, unified ≡ all_items
+    #   but with _bucket tag preserved for filtering)
+    #
+    #  We rebuild from scratch so _bucket is always present.
+    unified_by_sid: dict[str, dict] = {
+        it["subjectId"]: it for it in existing_unified if it.get("subjectId")
+    }
+    for it in clean_score(new_enriched):
+        sid = it.get("subjectId", "")
+        if sid:
+            unified_by_sid[sid] = it
 
-    # ── 4f. Save index ──
+    # Merge any items in all_items that have no _bucket (older runs)
+    for it in all_items:
+        sid = it.get("subjectId", "")
+        if sid and sid not in unified_by_sid:
+            entry = dict(it)
+            if "_bucket" not in entry:
+                entry["_bucket"] = "other"
+            unified_by_sid[sid] = entry
+
+    all_unified = list(unified_by_sid.values())
+    for idx, it in enumerate(all_unified, start=1):
+        it["serial_no"] = idx
+
+    # ── 11. Save all file sets ─────────────────────────────────
+    print("\n→ Saving files …")
+    parts_all     = save_split_parts("entertainment_data",        all_items)
+    parts_perfect = save_split_parts("100percent_matching",       all_perfect)
+    parts_near    = save_split_parts("100percentornearmatching",  all_near)
+    parts_unified = save_split_parts(UNIFIED_PREFIX,              all_unified)
+
+    # ── 12. Save index ─────────────────────────────────────────
     save_index({
         "last_run"           : time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "total_all"          : len(all_items),
         "total_perfect"      : len(all_perfect),
         "total_near"         : len(all_near),
-        "new_this_run"       : len(new_all),
+        "total_unified"      : len(all_unified),
+        "total_raw"          : len(all_raw),
+        "new_this_run"       : len(new_enriched),
         "pages_fetched"      : PAGES_TO_FETCH,
         "max_file_size_mb"   : MAX_FILE_BYTES / (1024 * 1024),
+        "total_unique_urls"  : len(all_urls_ordered),
+        "url_list_parts"     : url_parts,
         "parts": {
-            "entertainment_data"        : parts_all,
-            "100percent_matching"       : parts_perfect,
-            "100percentornearmatching"  : parts_near,
+            "entertainment_data"       : parts_all,
+            "100percent_matching"      : parts_perfect,
+            "100percentornearmatching" : parts_near,
+            UNIFIED_PREFIX             : parts_unified,
+            RAW_PREFIX                 : parts_raw,
         },
     })
 
     print("\n" + "=" * 60)
     print(f"  Done!")
-    print(f"  New this run : {len(new_all)}")
-    print(f"  Total all    : {len(all_items)}  →  {len(parts_all)} part(s)")
-    print(f"  Total 100%   : {len(all_perfect)}  →  {len(parts_perfect)} part(s)")
-    print(f"  Total near   : {len(all_near)}  →  {len(parts_near)} part(s)")
+    print(f"  New this run     : {len(new_enriched)}")
+    print(f"  Total all        : {len(all_items)}  →  {len(parts_all)} part(s)")
+    print(f"  Total 100%       : {len(all_perfect)}  →  {len(parts_perfect)} part(s)")
+    print(f"  Total near       : {len(all_near)}  →  {len(parts_near)} part(s)")
+    print(f"  Total unified    : {len(all_unified)}  →  {len(parts_unified)} part(s)")
+    print(f"  Total raw        : {len(all_raw)}  →  {len(parts_raw)} part(s)")
+    print(f"  Unique URLs      : {len(all_urls_ordered)}  →  {len(url_parts)} URL file(s)")
     print("=" * 60)
 
 
