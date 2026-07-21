@@ -3,7 +3,7 @@ name: AOneRoom Trending Scraper
 on:
   # ── Scheduled runs ──────────────────────────────────────────
   schedule:
-    - cron: "0 */6 * * *"   # every 6 hours
+    - cron: "0 */2 * * *"   # every 2 hours → auto-fetches next 10 pages each run
 
   # ── Manual trigger (with optional overrides) ────────────────
   workflow_dispatch:
@@ -13,7 +13,8 @@ on:
           Total pages to fetch (cumulative target).
           ⚠️  Check the "Progress Summary" job output FIRST to see the
           last processed page, then set this to any number above it.
-          Leave blank to auto-extend by +10 from the last processed page.
+          Leave blank → auto-extends to (last_page + 10).
+          Example: if pages 1–20 are done, auto run fetches pages 21–30.
         required: false
         default: ""
       per_page:
@@ -104,11 +105,14 @@ jobs:
 
           # ── Resolve pages_to_fetch ──
           user_input = "${{ github.event.inputs.pages_to_fetch }}".strip()
-          suggested_target = last_page + 10          # always suggest +10
+          # Auto-extend: always fetch the NEXT 10 pages beyond what's done.
+          # e.g. last_page=20 → target=30 → scraper skips 1-20, fetches 21-30.
+          # e.g. last_page=30 → target=40 → scraper skips 1-30, fetches 31-40.
+          suggested_target = last_page + 10
           if user_input.isdigit():
-              resolved = int(user_input)
+              resolved = int(user_input)             # manual override
           else:
-              resolved = suggested_target             # auto: last + 10
+              resolved = suggested_target             # scheduled / blank → auto +10
 
           # ── Write GitHub Actions outputs ──
           with open(os.environ["GITHUB_OUTPUT"], "a") as fh:
