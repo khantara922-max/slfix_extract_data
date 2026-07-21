@@ -29,7 +29,7 @@ from difflib import SequenceMatcher
 # CONFIG
 # ──────────────────────────────────────────────
 BASE_URL              = "https://h5-api.aoneroom.com/wefeed-h5api-bff/subject/trending"
-TMDB_API_KEY          = os.environ.get("6fad3f86b8452ee232deb7977d7dcf58", "")
+TMDB_API_KEY          = "6fad3f86b8452ee232deb7977d7dcf58"
 TMDB_SEARCH_MOVIE     = "https://api.themoviedb.org/3/search/movie"
 TMDB_SEARCH_TV        = "https://api.themoviedb.org/3/search/tv"
 TMDB_MOVIE_DETAIL     = "https://api.themoviedb.org/3/movie/{}"
