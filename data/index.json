@@ -1,11 +1,17 @@
 {
-  "last_run": "2026-07-21T13:13:51Z",
-  "total_all": 836,
+  "last_run": "2026-07-21T14:26:20Z",
+  "total_all": 853,
   "total_perfect": 3,
-  "total_near": 772,
-  "new_this_run": 19,
+  "total_near": 787,
+  "total_unified": 853,
+  "total_raw": 17,
+  "new_this_run": 17,
   "pages_fetched": 10,
   "max_file_size_mb": 2.0,
+  "total_unique_urls": 853,
+  "url_list_parts": [
+    "main_urls_list_part_1.txt"
+  ],
   "parts": {
     "entertainment_data": [
       "entertainment_data_part_1.json"
@@ -15,6 +21,12 @@
     ],
     "100percentornearmatching": [
       "100percentornearmatching_part_1.json"
+    ],
+    "all_data": [
+      "all_data_part_1.json"
+    ],
+    "raw_fetched": [
+      "raw_fetched_part_1.json"
     ]
   }
 }
