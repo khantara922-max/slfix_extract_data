@@ -3,21 +3,25 @@ name: AOneRoom Trending Scraper
 on:
   # ── Scheduled runs ──────────────────────────────────────────
   schedule:
-    - cron: "0 */6 * * *"   # every 6 hours  (change as needed)
+    - cron: "0 */6 * * *"   # every 6 hours
 
   # ── Manual trigger (with optional overrides) ────────────────
   workflow_dispatch:
     inputs:
       pages_to_fetch:
-        description: "Number of pages to fetch (default: 10)"
+        description: |
+          Total pages to fetch (cumulative target).
+          ⚠️  Check the "Progress Summary" job output FIRST to see the
+          last processed page, then set this to any number above it.
+          Leave blank to auto-extend by +10 from the last processed page.
         required: false
-        default: "10"
+        default: ""
       per_page:
         description: "Items per page (default: 100)"
         required: false
         default: "100"
 
-  # ── Also run on push to main (useful for first-time setup) ──
+  # ── Also run on push to main ─────────────────────────────────
   push:
     branches:
       - main
@@ -26,45 +30,275 @@ on:
       - ".github/workflows/scraper.yml"
       - "requirements.txt"
 
-# ────────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────
 jobs:
-  scrape-and-commit:
-    name: Scrape → Enrich → Commit
-    runs-on: ubuntu-latest
-    timeout-minutes: 120   # 10 pages × 100 items × ~1 s each ≈ 17 min; keep headroom
 
-    permissions:
-      contents: write      # needed to push the updated data files back
+  # ══════════════════════════════════════════════════════════════
+  #  JOB 1 — Show progress BEFORE scraping so the user can decide
+  # ══════════════════════════════════════════════════════════════
+  show-progress:
+    name: "📊 Progress Summary (read before setting pages)"
+    runs-on: ubuntu-latest
+    # Always run this job — even on schedule — so the summary is
+    # visible in the Actions UI for every run.
+    outputs:
+      last_page: ${{ steps.read.outputs.last_page }}
+      total_items: ${{ steps.read.outputs.total_items }}
+      total_urls: ${{ steps.read.outputs.total_urls }}
+      total_not_found: ${{ steps.read.outputs.total_not_found }}
+      last_run: ${{ steps.read.outputs.last_run }}
+      suggested_target: ${{ steps.read.outputs.suggested_target }}
+      resolved_pages_to_fetch: ${{ steps.read.outputs.resolved_pages_to_fetch }}
 
     steps:
-      # 1. Check out the repo (full history so we can push back)
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      # ── Read index.json / page_already_extracted.txt ──────────
+      - name: Read current progress
+        id: read
+        shell: python3 {0}
+        run: |
+          import json, os, pathlib, re
+
+          data_dir = pathlib.Path("data")
+          index_path   = data_dir / "index.json"
+          tracker_path = data_dir / "page_already_extracted.txt"
+
+          # ── Parse index.json (preferred) ──
+          last_page      = 0
+          total_items    = 0
+          total_urls     = 0
+          total_not_found = 0
+          last_run       = "never"
+          extracted_pages = []
+
+          if index_path.exists():
+              try:
+                  d = json.loads(index_path.read_text())
+                  last_page       = d.get("max_page_extracted", 0)
+                  total_items     = d.get("total_items", 0)
+                  total_urls      = d.get("total_unique_urls", 0)
+                  total_not_found = d.get("total_not_found", 0)
+                  last_run        = d.get("last_run", "never")
+                  extracted_pages = d.get("pages_extracted_total", [])
+              except Exception:
+                  pass
+
+          # ── Fallback: parse page_already_extracted.txt ──
+          if last_page == 0 and tracker_path.exists():
+              nums = []
+              for line in tracker_path.read_text().splitlines():
+                  line = line.strip()
+                  if line.isdigit():
+                      nums.append(int(line))
+              if nums:
+                  last_page = max(nums)
+                  extracted_pages = sorted(nums)
+
+          # ── Detect gaps ──
+          all_expected = set(range(1, last_page + 1)) if last_page else set()
+          gaps = sorted(all_expected - set(extracted_pages))
+
+          # ── Resolve pages_to_fetch ──
+          user_input = "${{ github.event.inputs.pages_to_fetch }}".strip()
+          suggested_target = last_page + 10          # always suggest +10
+          if user_input.isdigit():
+              resolved = int(user_input)
+          else:
+              resolved = suggested_target             # auto: last + 10
+
+          # ── Write GitHub Actions outputs ──
+          with open(os.environ["GITHUB_OUTPUT"], "a") as fh:
+              fh.write(f"last_page={last_page}\n")
+              fh.write(f"total_items={total_items}\n")
+              fh.write(f"total_urls={total_urls}\n")
+              fh.write(f"total_not_found={total_not_found}\n")
+              fh.write(f"last_run={last_run}\n")
+              fh.write(f"suggested_target={suggested_target}\n")
+              fh.write(f"resolved_pages_to_fetch={resolved}\n")
+
+          # ── Write GitHub Step Summary (shown in Actions UI) ──
+          summary_lines = [
+              "## 📊 AOneRoom Scraper — Current Progress",
+              "",
+              "| Metric | Value |",
+              "|--------|-------|",
+              f"| 🗂️  Last page processed | **{last_page}** |",
+              f"| 📦  Total items collected | **{total_items:,}** |",
+              f"| 🔗  Unique URLs tracked | **{total_urls:,}** |",
+              f"| ❓  Not found / not matching | **{total_not_found:,}** |",
+              f"| 🕐  Last successful run | `{last_run}` |",
+              "",
+          ]
+
+          if extracted_pages:
+              summary_lines += [
+                  "### ✅ Pages already extracted",
+                  f"> {extracted_pages}",
+                  "",
+              ]
+
+          if gaps:
+              summary_lines += [
+                  "### ⚠️ Gaps detected (pages missing from tracker)",
+                  f"> {gaps}  ← these will be **re-fetched** automatically",
+                  "",
+              ]
+          else:
+              summary_lines.append("### ✅ No gaps — all pages are contiguous")
+              summary_lines.append("")
+
+          summary_lines += [
+              "---",
+              "## 🚀 What will happen next",
+              "",
+          ]
+
+          if user_input.isdigit():
+              summary_lines += [
+                  f"You manually set **`pages_to_fetch = {resolved}`**.",
+                  "",
+                  f"- Pages **1 → {last_page}** are already done and will be **skipped**.",
+              ]
+              new_pages = sorted(set(range(1, resolved + 1)) - set(extracted_pages))
+              if new_pages:
+                  summary_lines.append(f"- Pages to fetch this run: **{new_pages}**")
+              else:
+                  summary_lines.append(f"- ⚠️  All pages up to {resolved} are already done — **nothing will be fetched**. Increase the number!")
+          else:
+              new_pages = sorted(set(range(1, suggested_target + 1)) - set(extracted_pages))
+              summary_lines += [
+                  f"No manual input → **auto-extending to page {suggested_target}** (last processed + 10).",
+                  "",
+                  f"- Pages to fetch this run: **{new_pages}**",
+              ]
+
+          summary_lines += [
+              "",
+              "---",
+              "## 💡 How to control the next manual run",
+              "",
+              "1. Click **Run workflow** → **workflow_dispatch**",
+              f"2. Set `pages_to_fetch` to any number **> {last_page}**",
+              f"   - e.g. `{last_page + 5}` to fetch 5 more pages",
+              f"   - e.g. `{last_page + 20}` to fetch 20 more pages",
+              "3. Pages already extracted are always **skipped automatically** — no duplicates.",
+              "",
+              "> 🔒 Leave `pages_to_fetch` **blank** on scheduled runs — the scraper auto-extends by +10.",
+          ]
+
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "w") as fh:
+              fh.write("\n".join(summary_lines) + "\n")
+
+          # ── Also print to console ──
+          print("=" * 60)
+          print(f"  Last page processed   : {last_page}")
+          print(f"  Total items           : {total_items:,}")
+          print(f"  Unique URLs           : {total_urls:,}")
+          print(f"  Not found / mismatch  : {total_not_found:,}")
+          print(f"  Last run              : {last_run}")
+          print(f"  Suggested next target : {suggested_target}")
+          print(f"  Resolved target       : {resolved}  (will pass to scraper)")
+          if gaps:
+              print(f"  ⚠  Gaps to re-fetch   : {gaps}")
+          print("=" * 60)
+
+  # ══════════════════════════════════════════════════════════════
+  #  JOB 2 — Run the actual scraper (depends on Job 1)
+  # ══════════════════════════════════════════════════════════════
+  scrape-and-commit:
+    name: "🤖 Scrape → Enrich → Commit"
+    runs-on: ubuntu-latest
+    needs: show-progress          # always runs after Job 1
+    timeout-minutes: 120
+
+    permissions:
+      contents: write
+
+    steps:
+      # 1. Checkout
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      # 2. Set up Python
+      # 2. Echo resolved config so it's visible in the job log
+      - name: "📋 Resolved scraper config"
+        run: |
+          echo "=================================================="
+          echo "  Last page processed  : ${{ needs.show-progress.outputs.last_page }}"
+          echo "  pages_to_fetch (this run) : ${{ needs.show-progress.outputs.resolved_pages_to_fetch }}"
+          echo "  per_page             : ${{ github.event.inputs.per_page || '100' }}"
+          echo "=================================================="
+          echo ""
+          echo "ℹ️  Pages 1–${{ needs.show-progress.outputs.last_page }} are already done"
+          echo "    and will be SKIPPED by the scraper automatically."
+          echo ""
+          if [ "${{ needs.show-progress.outputs.resolved_pages_to_fetch }}" -le "${{ needs.show-progress.outputs.last_page }}" ]; then
+            echo "⚠️  WARNING: pages_to_fetch (${{ needs.show-progress.outputs.resolved_pages_to_fetch }})"
+            echo "   is not greater than the last processed page (${{ needs.show-progress.outputs.last_page }})."
+            echo "   The scraper will exit early with nothing to do."
+          fi
+
+      # 3. Set up Python
       - name: Set up Python 3.11
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
           cache: "pip"
 
-      # 3. Install dependencies
+      # 4. Install dependencies
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      # 4. Run the scraper
+      # 5. Run the scraper — use resolved_pages_to_fetch from Job 1
       - name: Run scraper
         env:
-          TMDB_API_KEY    : ${{ secrets.TMDB_API_KEY }}
-          DATA_DIR        : data
-          PAGES_TO_FETCH  : ${{ github.event.inputs.pages_to_fetch || '10' }}
-          PER_PAGE        : ${{ github.event.inputs.per_page       || '100' }}
+          TMDB_API_KEY   : ${{ secrets.TMDB_API_KEY }}
+          DATA_DIR       : data
+          PAGES_TO_FETCH : ${{ needs.show-progress.outputs.resolved_pages_to_fetch }}
+          PER_PAGE       : ${{ github.event.inputs.per_page || '100' }}
         run: python scripts/scraper.py
 
-      # 5. Commit & push results back to the repo
+      # 6. Write post-run summary to GitHub Step Summary
+      - name: Write post-run summary
+        if: always()
+        shell: python3 {0}
+        run: |
+          import json, os, pathlib
+
+          index_path = pathlib.Path("data/index.json")
+          lines = ["## ✅ Scraper run complete", ""]
+
+          if index_path.exists():
+              try:
+                  d = json.loads(index_path.read_text())
+                  lines += [
+                      "| Metric | Value |",
+                      "|--------|-------|",
+                      f"| 📄  New items this run | **{d.get('new_this_run', 0):,}** |",
+                      f"| 📦  Total items now | **{d.get('total_items', 0):,}** |",
+                      f"| 🔗  Total unique URLs | **{d.get('total_unique_urls', 0):,}** |",
+                      f"| ❓  Not found / mismatch | **{d.get('total_not_found', 0):,}** |",
+                      f"| 📑  Max page extracted | **{d.get('max_page_extracted', 0)}** |",
+                      f"| 🕐  Run timestamp | `{d.get('last_run', 'N/A')}` |",
+                      "",
+                      f"**Pages extracted in this run:** `{d.get('pages_fetched_this_run', [])}`",
+                      f"**All pages ever extracted:** `{d.get('pages_extracted_total', [])}`",
+                  ]
+              except Exception as e:
+                  lines.append(f"⚠️ Could not parse index.json: {e}")
+          else:
+              lines.append("⚠️ No index.json found — scraper may not have written output.")
+
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "w") as fh:
+              fh.write("\n".join(lines) + "\n")
+
+      # 7. Commit & push results
       - name: Commit updated data files
         run: |
           git config user.name  "github-actions[bot]"
@@ -72,21 +306,24 @@ jobs:
 
           git add data/
 
-          # Only commit if something actually changed
           if git diff --cached --quiet; then
             echo "No changes to commit — data is already up to date."
           else
             TIMESTAMP=$(date -u +"%Y-%m-%d %H:%M UTC")
-            TOTAL=$(python - <<'EOF'
-          import json, pathlib, re
+            STATS=$(python3 - <<'EOF'
+          import json, pathlib
           idx = pathlib.Path("data/index.json")
           if idx.exists():
               d = json.loads(idx.read_text())
-              print(f"all={d.get('total_all',0)} | new={d.get('new_this_run',0)}")
+              new   = d.get("new_this_run", 0)
+              total = d.get("total_items", 0)
+              max_p = d.get("max_page_extracted", 0)
+              pages = d.get("pages_fetched_this_run", [])
+              print(f"pages={pages} | new={new} | total={total} | max_page={max_p}")
           else:
               print("updated")
           EOF
           )
-            git commit -m "chore(data): scraper run ${TIMESTAMP} — ${TOTAL}"
+            git commit -m "chore(data): scraper run ${TIMESTAMP} — ${STATS}"
             git push
           fi
