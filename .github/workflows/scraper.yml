@@ -1,0 +1,92 @@
+name: AOneRoom Trending Scraper
+
+on:
+  # ── Scheduled runs ──────────────────────────────────────────
+  schedule:
+    - cron: "0 */6 * * *"   # every 6 hours  (change as needed)
+
+  # ── Manual trigger (with optional overrides) ────────────────
+  workflow_dispatch:
+    inputs:
+      pages_to_fetch:
+        description: "Number of pages to fetch (default: 10)"
+        required: false
+        default: "10"
+      per_page:
+        description: "Items per page (default: 100)"
+        required: false
+        default: "100"
+
+  # ── Also run on push to main (useful for first-time setup) ──
+  push:
+    branches:
+      - main
+    paths:
+      - "scripts/scraper.py"
+      - ".github/workflows/scraper.yml"
+      - "requirements.txt"
+
+# ────────────────────────────────────────────────────────────────
+jobs:
+  scrape-and-commit:
+    name: Scrape → Enrich → Commit
+    runs-on: ubuntu-latest
+    timeout-minutes: 120   # 10 pages × 100 items × ~1 s each ≈ 17 min; keep headroom
+
+    permissions:
+      contents: write      # needed to push the updated data files back
+
+    steps:
+      # 1. Check out the repo (full history so we can push back)
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      # 2. Set up Python
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      # 3. Install dependencies
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      # 4. Run the scraper
+      - name: Run scraper
+        env:
+          TMDB_API_KEY    : ${{ secrets.TMDB_API_KEY }}
+          DATA_DIR        : data
+          PAGES_TO_FETCH  : ${{ github.event.inputs.pages_to_fetch || '10' }}
+          PER_PAGE        : ${{ github.event.inputs.per_page       || '100' }}
+        run: python scripts/scraper.py
+
+      # 5. Commit & push results back to the repo
+      - name: Commit updated data files
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          git add data/
+
+          # Only commit if something actually changed
+          if git diff --cached --quiet; then
+            echo "No changes to commit — data is already up to date."
+          else
+            TIMESTAMP=$(date -u +"%Y-%m-%d %H:%M UTC")
+            TOTAL=$(python - <<'EOF'
+          import json, pathlib, re
+          idx = pathlib.Path("data/index.json")
+          if idx.exists():
+              d = json.loads(idx.read_text())
+              print(f"all={d.get('total_all',0)} | new={d.get('new_this_run',0)}")
+          else:
+              print("updated")
+          EOF
+          )
+            git commit -m "chore(data): scraper run ${TIMESTAMP} — ${TOTAL}"
+            git push
+          fi
