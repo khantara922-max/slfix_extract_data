@@ -883,5 +883,20 @@
     "imdbRatingCount": 160,
     "url": "https://pbcdnw.aoneroom.com/image/2026/01/26/71948c401d36d6d008bb0a9d79304809.jpg",
     "not_found_reason": "imdb_id_missing"
+  },
+  {
+    "serial_no": 60,
+    "main_url": "https://sflix.film/spa/videoPlayPage/movies/helluva-boss-4sTlB0UZtLa",
+    "detailPath": "helluva-boss-4sTlB0UZtLa",
+    "title": "Helluva Boss",
+    "releaseDate": "2019-11-25",
+    "subjectId": "9035786589275865040",
+    "imdb_id/tmdb_id": "N/A",
+    "genre": "Animation,Action,Comedy",
+    "countryName": "United States",
+    "imdbRatingValue": "8.0",
+    "imdbRatingCount": 16637,
+    "url": "https://pbcdnw.aoneroom.com/image/2026/01/26/7d0922af98f1aea4f337658276913c93.jpg",
+    "not_found_reason": "no_tmdb_match"
   }
 ]
