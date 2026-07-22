@@ -778,5 +778,20 @@
     "imdbRatingCount": 372,
     "url": "https://pbcdnw.aoneroom.com/image/2026/01/26/467b6046c66683e747ff517cbf76ac6c.jpg",
     "not_found_reason": "ids_not_matching"
+  },
+  {
+    "serial_no": 53,
+    "main_url": "https://sflix.film/spa/videoPlayPage/movies/culpa-tuya-english-S1JHptV1dH1",
+    "detailPath": "culpa-tuya-english-S1JHptV1dH1",
+    "title": "Culpa Tuya [English]",
+    "releaseDate": "2024-12-27",
+    "subjectId": "1424239294905992832",
+    "imdb_id/tmdb_id": "N/A",
+    "genre": "Drama,Romance",
+    "countryName": "Spain",
+    "imdbRatingValue": "5.2",
+    "imdbRatingCount": 17689,
+    "url": "https://pbcdnw.aoneroom.com/image/2026/01/26/791eb4e0d3df66dc4aa56195ba48cf0f.jpg",
+    "not_found_reason": "no_tmdb_match"
   }
 ]
