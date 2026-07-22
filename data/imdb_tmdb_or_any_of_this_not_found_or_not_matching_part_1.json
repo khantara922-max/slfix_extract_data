@@ -793,5 +793,50 @@
     "imdbRatingCount": 17689,
     "url": "https://pbcdnw.aoneroom.com/image/2026/01/26/791eb4e0d3df66dc4aa56195ba48cf0f.jpg",
     "not_found_reason": "no_tmdb_match"
+  },
+  {
+    "serial_no": 54,
+    "main_url": "https://sflix.film/spa/videoPlayPage/movies/asur-welcome-to-your-dark-side-I49XayGZT82",
+    "detailPath": "asur-welcome-to-your-dark-side-I49XayGZT82",
+    "title": "Asur: Welcome to Your Dark Side",
+    "releaseDate": "2020-03-02",
+    "subjectId": "1799121365325207248",
+    "imdb_id/tmdb_id": "N/A",
+    "genre": "Crime,Drama,Mystery",
+    "countryName": "India",
+    "imdbRatingValue": "8.5",
+    "imdbRatingCount": 70228,
+    "url": "https://pbcdnw.aoneroom.com/image/2026/01/26/a657fbde88edc9d69f5b712b6e2f238c.jpg",
+    "not_found_reason": "no_tmdb_match"
+  },
+  {
+    "serial_no": 55,
+    "main_url": "https://sflix.film/spa/videoPlayPage/movies/ben-10-U0kraeZPQt4",
+    "detailPath": "ben-10-U0kraeZPQt4",
+    "title": "Ben 10",
+    "releaseDate": "2017-04-10",
+    "subjectId": "3761309738944840528",
+    "imdb_id/tmdb_id": "N/A",
+    "genre": "Animation,Short,Action",
+    "countryName": "United States",
+    "imdbRatingValue": "2.8",
+    "imdbRatingCount": 7441,
+    "url": "https://pbcdnw.aoneroom.com/image/2026/01/27/2cadda0bc4aa6a0ee958f8ec09cf697b.jpg",
+    "not_found_reason": "no_tmdb_match"
+  },
+  {
+    "serial_no": 56,
+    "main_url": "https://sflix.film/spa/videoPlayPage/movies/dreaming-of-cinde-fxxxing-rella-eLGWJfJqLQ6",
+    "detailPath": "dreaming-of-cinde-fxxxing-rella-eLGWJfJqLQ6",
+    "title": "Dreaming of Cinde Fxxxing Rella",
+    "releaseDate": "2024-09-26",
+    "subjectId": "5750080812989513848",
+    "imdb_id/tmdb_id": "N/A",
+    "genre": "Comedy,Drama,Romance",
+    "countryName": "Korea",
+    "imdbRatingValue": "6.8",
+    "imdbRatingCount": 909,
+    "url": "https://pbcdnw.aoneroom.com/image/2025/11/03/0af6b0197498482c9eeec853c4a27796.jpg",
+    "not_found_reason": "no_tmdb_match"
   }
 ]
