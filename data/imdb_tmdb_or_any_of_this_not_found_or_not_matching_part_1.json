@@ -988,5 +988,35 @@
     "imdbRatingCount": 0,
     "url": "https://pbcdnw.aoneroom.com/image/2025/11/10/06e7123706bd8610c4862fdd93dc1884.jpg",
     "not_found_reason": "no_tmdb_match"
+  },
+  {
+    "serial_no": 67,
+    "main_url": "https://sflix.film/spa/videoPlayPage/movies/blue-exorcist-shimane-illuminati-saga-2VMMDRZkUh1",
+    "detailPath": "blue-exorcist-shimane-illuminati-saga-2VMMDRZkUh1",
+    "title": "Blue Exorcist: Shimane Illuminati Saga",
+    "releaseDate": "2024-01-06",
+    "subjectId": "1081730829317014560",
+    "imdb_id/tmdb_id": "N/A",
+    "genre": "Anime,Action,Fantasy",
+    "countryName": "Japan",
+    "imdbRatingValue": "6.9",
+    "imdbRatingCount": 598,
+    "url": "https://pbcdnw.aoneroom.com/image/2026/01/26/df4973f974f2582dad92c0c66b77a171.jpg",
+    "not_found_reason": "no_tmdb_match"
+  },
+  {
+    "serial_no": 68,
+    "main_url": "https://sflix.film/spa/videoPlayPage/movies/ip-man-2-UmHNMxjrfn6",
+    "detailPath": "ip-man-2-UmHNMxjrfn6",
+    "title": "Ip Man 2",
+    "releaseDate": "2025-10-05",
+    "subjectId": "5350520481110212560",
+    "imdb_id/tmdb_id": "N/A",
+    "genre": "Action,Biography,Drama",
+    "countryName": "Hongkong, China",
+    "imdbRatingValue": "7.5",
+    "imdbRatingCount": 115834,
+    "url": "https://pbcdnw.aoneroom.com/image/2026/01/21/8cc126243a238dc88db09efcad99fce4.jpg",
+    "not_found_reason": "no_tmdb_match"
   }
 ]
