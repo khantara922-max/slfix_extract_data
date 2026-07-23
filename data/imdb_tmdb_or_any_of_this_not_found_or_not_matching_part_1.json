@@ -1063,5 +1063,35 @@
     "imdbRatingCount": 3012,
     "url": "https://pbcdnw.aoneroom.com/image/2025/11/02/bd96caff16752121b76df3f47e213a05.jpg",
     "not_found_reason": "no_tmdb_match"
+  },
+  {
+    "serial_no": 72,
+    "main_url": "https://sflix.film/spa/videoPlayPage/movies/sphiwo-QqU3AMRyAm2",
+    "detailPath": "sphiwo-QqU3AMRyAm2",
+    "title": "S'phiwo",
+    "releaseDate": "2024-01-06",
+    "subjectId": "1984397669371887816",
+    "imdb_id/tmdb_id": "N/A",
+    "genre": "Drama",
+    "countryName": "South Africa",
+    "imdbRatingValue": "6.9",
+    "imdbRatingCount": 0,
+    "url": "https://pbcdnw.aoneroom.com/image/2026/01/26/68231796843c52e7bbff109823e7ab30.jpg",
+    "not_found_reason": "no_tmdb_match"
+  },
+  {
+    "serial_no": 73,
+    "main_url": "https://sflix.film/spa/videoPlayPage/movies/black-butler-public-school-arc-cQb872Oz5i",
+    "detailPath": "black-butler-public-school-arc-cQb872Oz5i",
+    "title": "Black Butler: Public School Arc",
+    "releaseDate": "2024-04-13",
+    "subjectId": "244885356821317056",
+    "imdb_id/tmdb_id": "N/A",
+    "genre": "Anime,Action,Fantasy",
+    "countryName": "Japan",
+    "imdbRatingValue": "7.5",
+    "imdbRatingCount": 611,
+    "url": "https://pbcdnw.aoneroom.com/image/2026/01/26/5ef1785e8a42447230134bc132e8ef52.jpg",
+    "not_found_reason": "no_tmdb_match"
   }
 ]
