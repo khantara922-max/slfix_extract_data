@@ -1048,5 +1048,20 @@
     "imdbRatingCount": 7071,
     "url": "https://pbcdnw.aoneroom.com/image/2026/01/27/d883ad7947b8bdc0c5afc2361e83ad02.jpg",
     "not_found_reason": "no_tmdb_match"
+  },
+  {
+    "serial_no": 71,
+    "main_url": "https://sflix.film/spa/videoPlayPage/movies/spider-man-lotus-SBTTUanOw58",
+    "detailPath": "spider-man-lotus-SBTTUanOw58",
+    "title": "Spider-Man: Lotus",
+    "releaseDate": "2023-08-11",
+    "subjectId": "6789244640194610000",
+    "imdb_id/tmdb_id": "N/A",
+    "genre": "Drama,Sci-Fi",
+    "countryName": "United States",
+    "imdbRatingValue": "3.1",
+    "imdbRatingCount": 3012,
+    "url": "https://pbcdnw.aoneroom.com/image/2025/11/02/bd96caff16752121b76df3f47e213a05.jpg",
+    "not_found_reason": "no_tmdb_match"
   }
 ]
