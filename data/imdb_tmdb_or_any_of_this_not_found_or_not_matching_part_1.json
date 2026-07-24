@@ -1198,5 +1198,35 @@
     "imdbRatingCount": 3352,
     "url": "https://pbcdnw.aoneroom.com/image/2026/01/26/df9b1393a603fa172810d1fa7154cc04.jpg",
     "not_found_reason": "no_tmdb_match"
+  },
+  {
+    "serial_no": 81,
+    "main_url": "https://sflix.film/spa/videoPlayPage/movies/bad-and-crazy-8IkMptkeQF2",
+    "detailPath": "bad-and-crazy-8IkMptkeQF2",
+    "title": "Bad and Crazy",
+    "releaseDate": "2022-09-30",
+    "subjectId": "2245023431181879152",
+    "imdb_id/tmdb_id": "N/A",
+    "genre": "Action,Comedy,Crime",
+    "countryName": "Korea",
+    "imdbRatingValue": "8.0",
+    "imdbRatingCount": 6540,
+    "url": "https://pbcdnw.aoneroom.com/image/2025/11/02/8c27c5897c8e2ad390760a0653c2bab2.jpg",
+    "not_found_reason": "no_tmdb_match"
+  },
+  {
+    "serial_no": 82,
+    "main_url": "https://sflix.film/spa/videoPlayPage/movies/the-love-in-my-way-qN0qwMKo7t5",
+    "detailPath": "the-love-in-my-way-qN0qwMKo7t5",
+    "title": "The Love in My Way",
+    "releaseDate": "2026-01-01",
+    "subjectId": "4590687895937242536",
+    "imdb_id/tmdb_id": "None/312613",
+    "genre": "Drama",
+    "countryName": "Thailand",
+    "imdbRatingValue": "6.3",
+    "imdbRatingCount": 0,
+    "url": "https://pbcdnw.aoneroom.com/image/2026/02/06/8a862b44519e09367e707b4ff0aa5485.jpg",
+    "not_found_reason": "imdb_id_missing"
   }
 ]
