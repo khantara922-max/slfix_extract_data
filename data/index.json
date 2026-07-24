@@ -1,18 +1,18 @@
 {
-  "last_run": "2026-07-23T23:04:06Z",
-  "total_items": 1130,
-  "new_this_run": 10,
+  "last_run": "2026-07-24T03:28:25Z",
+  "total_items": 1139,
+  "new_this_run": 9,
   "pages_fetched_this_run": [
-    251,
-    252,
-    253,
-    254,
-    255,
-    256,
-    257,
-    258,
-    259,
-    260
+    261,
+    262,
+    263,
+    264,
+    265,
+    266,
+    267,
+    268,
+    269,
+    270
   ],
   "pages_extracted_total": [
     1,
@@ -274,12 +274,22 @@
     257,
     258,
     259,
-    260
+    260,
+    261,
+    262,
+    263,
+    264,
+    265,
+    266,
+    267,
+    268,
+    269,
+    270
   ],
-  "max_page_extracted": 260,
+  "max_page_extracted": 270,
   "max_file_size_mb": 2.0,
-  "total_unique_urls": 1207,
-  "total_not_found": 77,
+  "total_unique_urls": 1219,
+  "total_not_found": 80,
   "parts": {
     "all_data": [
       "all_data_part_1.json"

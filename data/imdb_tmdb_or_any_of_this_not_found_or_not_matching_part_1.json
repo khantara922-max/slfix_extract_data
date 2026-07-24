@@ -1153,5 +1153,50 @@
     "imdbRatingCount": 453,
     "url": "https://pbcdnw.aoneroom.com/image/2026/01/26/2afc6d753b8917502a873037d109596c.jpg",
     "not_found_reason": "no_tmdb_match"
+  },
+  {
+    "serial_no": 78,
+    "main_url": "https://sflix.film/spa/videoPlayPage/movies/cutie-pie-2-you-SvyR4HSqCh1",
+    "detailPath": "cutie-pie-2-you-SvyR4HSqCh1",
+    "title": "Cutie Pie 2 You",
+    "releaseDate": "2023-01-06",
+    "subjectId": "1077821429825110776",
+    "imdb_id/tmdb_id": "N/A",
+    "genre": "Romance",
+    "countryName": "Thailand",
+    "imdbRatingValue": "7.2",
+    "imdbRatingCount": 756,
+    "url": "https://pbcdnw.aoneroom.com/image/2026/01/26/2bf1577bdd4720d011053fac02dabbbb.jpg",
+    "not_found_reason": "no_tmdb_match"
+  },
+  {
+    "serial_no": 79,
+    "main_url": "https://sflix.film/spa/videoPlayPage/movies/how-to-spot-a-red-flag-OLLGEtiWAI",
+    "detailPath": "how-to-spot-a-red-flag-OLLGEtiWAI",
+    "title": "How to Spot a Red Flag",
+    "releaseDate": "2024-11-25",
+    "subjectId": "603697355057152096",
+    "imdb_id/tmdb_id": "None/272456",
+    "genre": "Comedy,Drama,Romance",
+    "countryName": "Hongkong, China",
+    "imdbRatingValue": "8.2",
+    "imdbRatingCount": 68,
+    "url": "https://pbcdnw.aoneroom.com/image/2026/01/26/6493eb52c810f54dff9b5671e85548d7.jpg",
+    "not_found_reason": "imdb_id_missing"
+  },
+  {
+    "serial_no": 80,
+    "main_url": "https://sflix.film/spa/videoPlayPage/movies/ghost-doctor-GvPDMrFjad5",
+    "detailPath": "ghost-doctor-GvPDMrFjad5",
+    "title": "Ghost Doctor",
+    "releaseDate": "2024-02-23",
+    "subjectId": "4374731620440496544",
+    "imdb_id/tmdb_id": "N/A",
+    "genre": "Comedy,Fantasy,Romance",
+    "countryName": "Korea",
+    "imdbRatingValue": "7.9",
+    "imdbRatingCount": 3352,
+    "url": "https://pbcdnw.aoneroom.com/image/2026/01/26/df9b1393a603fa172810d1fa7154cc04.jpg",
+    "not_found_reason": "no_tmdb_match"
   }
 ]
